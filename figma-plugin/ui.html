@@ -1,0 +1,413 @@
+<!doctype html>
+<html>
+  <body style="font: 12px Inter, sans-serif; padding: 16px; color: #1f2937; background: #ffffff">
+    <h2 style="margin: 0 0 8px">Open Canvas Importer</h2>
+    <p id="status" style="min-height: 32px; line-height: 1.35">Paste Figma-compatible HTML from Open Canvas, or enter its one-use pairing code.</p>
+    <label for="pairing-code">Pairing code (5 minutes, one use)</label>
+    <input id="pairing-code" autocomplete="off" spellcheck="false" maxlength="32" style="width: 100%; box-sizing: border-box; margin: 5px 0" />
+    <button id="pair" type="button">Read paired export</button>
+    <pre id="diagnostics" hidden style="white-space: pre-wrap; max-height: 150px; overflow: auto; padding: 8px; border-radius: 6px; background: #f3f4f6; color: #4b5563; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace"></pre>
+    <textarea id="payload" aria-label="Figma-compatible HTML payload" style="width: 100%; height: 90px"></textarea>
+    <div style="display: flex; gap: 8px; margin-top: 10px">
+      <button id="read" type="button">Read clipboard HTML</button>
+      <button id="import" type="button">Import editable layers</button>
+    </div>
+    <script>
+      const status = document.getElementById('status');
+      const payload = document.getElementById('payload');
+      const readButton = document.getElementById('read');
+      const pairingInput = document.getElementById('pairing-code');
+      const canvasBridgeUrls = ['http://localhost:5183/__codex_clipboard__'];
+
+      function looksLikeH2D(value) {
+        return /\(figmeta\)[\s\S]+\(\/figmeta\)/.test(value || '')
+          && /\(figh2d\)[\s\S]+\(\/figh2d\)/.test(value || '');
+      }
+
+      function setPayload(value, source) {
+        const html = String(value || '');
+        if (!html) return false;
+        payload.value = html;
+        if (looksLikeH2D(html)) {
+          status.textContent = `Figma-compatible HTML detected from ${source}. Click Import editable layers.`;
+        } else {
+          status.textContent = `Clipboard data received from ${source}, but no H2D markers were found.`;
+        }
+        return true;
+      }
+
+      function readClipboardWithExecCommand() {
+        if (typeof document.execCommand !== 'function') return false;
+        const holder = document.createElement('div');
+        holder.contentEditable = 'true';
+        holder.setAttribute('aria-hidden', 'true');
+        holder.style.cssText = 'position: fixed; left: -10000px; top: 0; width: 1px; height: 1px; opacity: 0;';
+        document.body.append(holder);
+        try {
+          holder.focus();
+          if (!document.execCommand('paste')) return looksLikeH2D(payload.value);
+          const pasted = holder.innerHTML || holder.textContent || '';
+          if (looksLikeH2D(pasted)) return setPayload(pasted, 'paste command');
+          return looksLikeH2D(payload.value);
+        } catch {
+          return false;
+        } finally {
+          holder.remove();
+        }
+      }
+
+      async function readCanvasBridge() {
+        const code = pairingInput.value.trim();
+        if (!/^[0-9a-f]{32}$/.test(code)) return false;
+        for (const bridgeUrl of canvasBridgeUrls) {
+          try {
+            const response = await fetch(bridgeUrl, {
+              cache: 'no-store', headers: { 'X-Open-Canvas-Code': code }
+            });
+            if (!response.ok) continue;
+            const html = await response.text();
+            if (setPayload(html, 'paired Canvas export') && looksLikeH2D(html)) {
+              pairingInput.value = '';
+              return true;
+            }
+          } catch {
+            // The bridge is optional; keep native clipboard fallbacks available.
+          }
+        }
+        return false;
+      }
+
+      async function readClipboardHtml({ allowExecCommand = false } = {}) {
+        if (navigator.clipboard?.read) {
+          try {
+            const items = await navigator.clipboard.read();
+            for (const item of items) {
+              if (!item.types.includes('text/html')) continue;
+              const blob = await item.getType('text/html');
+              const html = await blob.text();
+              // The system clipboard may contain unrelated HTML (for example
+              // a normal browser copy). Do not treat that as a successful
+              // importer read: keep looking for the Canvas bridge payload.
+              if (looksLikeH2D(html)) {
+                setPayload(html, 'system clipboard');
+                return true;
+              }
+            }
+          } catch {
+            // Figma's plugin iframe often rejects clipboard.read() even when
+            // the native paste event can still expose the companion string.
+          }
+        }
+        if (navigator.clipboard?.readText) {
+          try {
+            const text = await navigator.clipboard.readText();
+            if (setPayload(text, 'system clipboard text') && looksLikeH2D(text)) return true;
+          } catch {
+            // Keep the explicit paste path available when read permission is
+            // unavailable in the plugin sandbox.
+          }
+        }
+        if (allowExecCommand && readClipboardWithExecCommand()) return true;
+        return false;
+      }
+
+      document.getElementById('pair').onclick = async () => {
+        if (!/^[0-9a-f]{32}$/.test(pairingInput.value.trim())) {
+          status.textContent = 'Enter the 32-character pairing code shown in Open Canvas.';
+          return;
+        }
+        status.textContent = 'Reading paired export...';
+        if (!await readCanvasBridge()) status.textContent = 'Pairing failed. The code may have expired or already been used; copy from Canvas again.';
+      };
+
+      async function handlePaste(event) {
+        // The same handler is registered on the document (capture phase) and
+        // the textarea (bubble phase) because Figma retargets paste events
+        // differently across desktop builds. Once the capture listener has
+        // handled the event, do not process it a second time.
+        if (event.defaultPrevented) return;
+        const html = event.clipboardData?.getData('text/html') || '';
+        const text = event.clipboardData?.getData('text/plain') || '';
+        if (html && looksLikeH2D(html)) {
+          event.preventDefault();
+          setPayload(html, 'paste event');
+          return;
+        }
+        // Figma's plugin sandbox can dispatch paste without exposing the HTML
+        // flavor on ClipboardEvent. The Canvas export carries the same marker
+        // document in text/plain specifically for this case.
+        if (text && looksLikeH2D(text)) {
+          event.preventDefault();
+          setPayload(text, 'paste event text fallback');
+          return;
+        }
+        // Keep the browser's default paste behavior when this sandbox exposes
+        // neither clipboard flavor. Figma can still insert its string flavor
+        // into the textarea, while cancelling here would leave the field
+        // empty and make the subsequent import look like a clipboard failure.
+        status.textContent = 'Paste received without readable H2D data. Trying the system clipboard...';
+        try {
+          if (await readClipboardHtml()) return;
+          if (looksLikeH2D(payload.value)) {
+          status.textContent = 'Figma-compatible HTML inserted into the field. Click Import editable layers.';
+            return;
+          }
+          status.textContent = 'Clipboard read is unavailable in this Figma sandbox. Focus the field and press Cmd/Ctrl+V after copying from Canvas.';
+        } catch (error) {
+          status.textContent = `Clipboard HTML permission denied. Click Read clipboard HTML (${error?.message || 'permission error'}).`;
+        }
+      }
+
+      // Listen on both the field and the document. Some Figma desktop builds
+      // retarget Cmd+V to the plugin document instead of the focused textarea.
+      payload.addEventListener('paste', handlePaste);
+      document.addEventListener('paste', handlePaste, true);
+      window.addEventListener('paste', handlePaste, true);
+      payload.addEventListener('focus', () => {
+        status.textContent = 'Paste Figma-compatible HTML into the field, then click Import editable layers.';
+      });
+      payload.addEventListener('input', () => {
+        if (looksLikeH2D(payload.value)) status.textContent = 'Figma-compatible HTML detected in the field. Click Import editable layers.';
+      });
+
+      // The plugin sandbox can swallow the native paste event when focus is
+      // still on the Figma canvas. Capture the shortcut at the document level
+      // and read the same clipboard item directly, without requiring the user
+      // to click into the textarea first.
+      document.addEventListener('keydown', async (event) => {
+        const pasteShortcut = (event.metaKey || event.ctrlKey)
+          && String(event.key || '').toLowerCase() === 'v';
+        if (!pasteShortcut) return;
+        // Do not cancel the shortcut here. In Figma Desktop the plugin
+        // sandbox often rejects navigator.clipboard, while the native paste
+        // event still exposes the HTML/string flavors to the focused
+        // textarea. Cancelling keydown prevents that event from ever firing.
+        status.textContent = 'Reading HTML from the system clipboard...';
+        try {
+          if (await readClipboardHtml()) return;
+          if (payload.value) return;
+          status.textContent = 'Clipboard read is unavailable; waiting for the native paste event...';
+        } catch (error) {
+          if (payload.value) return;
+          status.textContent = `Clipboard HTML permission denied: ${error?.message || 'permission error'}`;
+        }
+      }, true);
+
+      readButton.onclick = async () => {
+        status.textContent = 'Reading HTML from the system clipboard...';
+        try {
+          if (await readClipboardHtml({ allowExecCommand: true })) return;
+          status.textContent = 'No readable HTML was found. Focus the field and press Cmd/Ctrl+V after copying from Canvas.';
+        } catch (error) {
+          status.textContent = `Clipboard HTML permission denied: ${error?.message || 'permission error'}`;
+        }
+      };
+      function decode(value) {
+        const binary = atob(value);
+        const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+      }
+      function markerPayload(html, attribute, marker) {
+        const comment = html.match(new RegExp('<!--\\(' + marker + '\\)([A-Za-z0-9+/=]+)\\(\\/' + marker + '\\)--\\>'));
+        if (comment?.[1]) return comment[1];
+        const escapedComment = html.match(new RegExp('&lt;!--\\(' + marker + '\\)([A-Za-z0-9+/=]+)\\(\\/' + marker + '\\)--&gt;'));
+        if (escapedComment?.[1]) return escapedComment[1];
+        const direct = html.match(new RegExp(attribute + '="[^\"]*?\\(' + marker + '\\)([A-Za-z0-9+/=]+)\\(\\/' + marker + '\\)'));
+        if (direct?.[1]) return direct[1];
+        try {
+          const parsed = new DOMParser().parseFromString(html, 'text/html');
+          const value = parsed.querySelector('[' + attribute + ']')?.getAttribute(attribute) || '';
+          const decoded = value.match(new RegExp('\\(' + marker + '\\)([A-Za-z0-9+/=]+)\\(\\/' + marker + '\\)'));
+          if (decoded?.[1]) return decoded[1];
+        } catch {}
+        return null;
+      }
+      function inspectScene(node, depth, state) {
+        if (!node || typeof node !== 'object') throw new Error('Invalid Open Canvas scene node');
+        state.count += 1;
+        state.maxDepth = Math.max(state.maxDepth, depth);
+        if (state.count > 20000) throw new Error('The page contains too many scene nodes');
+        if (state.maxDepth > 80) throw new Error('The scene nesting is too deep');
+        if (!node.rect || !Number.isFinite(Number(node.rect.width)) || !Number.isFinite(Number(node.rect.height))) {
+          throw new Error('The scene contains an invalid node rectangle');
+        }
+        (node.children || []).forEach(child => inspectScene(child, depth + 1, state));
+      }
+      document.getElementById('import').onclick = () => {
+        try {
+          const html = payload.value;
+          const metaPayload = markerPayload(html, 'data-metadata', 'figmeta');
+          const h2dPayload = markerPayload(html, 'data-h2d', 'figh2d') || markerPayload(html, 'data-buffer', 'figh2d');
+          if (!metaPayload || !h2dPayload) throw new Error('Figma-compatible export markers are missing');
+          let metadata = {};
+          try { metadata = JSON.parse(decode(metaPayload)); } catch { throw new Error('Invalid Figma metadata'); }
+          const decoded = JSON.parse(decode(h2dPayload));
+          const parsed = Array.isArray(decoded) ? decoded[0] : decoded;
+          if (parsed.version !== 2 || !parsed.root) throw new Error('Unsupported Figma-compatible export version');
+          if ((parsed.documentRect?.width || 0) > 10000 || (parsed.documentRect?.height || 0) > 10000) throw new Error('The page dimensions exceed the import limit');
+          const assets = Object.values(parsed.assets || {});
+          if (assets.length > 500) throw new Error('The page contains too many assets');
+          let count = 0;
+          let maxDepth = 0;
+          const inspect = (node, depth) => {
+            count += 1;
+            maxDepth = Math.max(maxDepth, depth);
+            if (count > 20000) throw new Error('The page contains too many nodes');
+            if (maxDepth > 80) throw new Error('The page nesting is too deep');
+            (node.childNodes || []).filter(child => child?.nodeType === 1).forEach(child => inspect(child, depth + 1));
+          };
+          inspect(parsed.root, 0);
+          const nodeCount = JSON.stringify(parsed.root).length;
+          if (nodeCount > 8_000_000) throw new Error('The page is too large to import');
+          let scene;
+          const scenePayload = markerPayload(html, 'data-open-canvas-scene', 'opencanvas') || markerPayload(html, 'data-neuxmind-scene', 'neuxscene');
+          if (scenePayload) {
+            scene = JSON.parse(decode(scenePayload));
+            if (scene?.version !== 1 || !scene.root) throw new Error('Unsupported Open Canvas scene version');
+            if ((scene.viewport?.width || 0) > 10000 || (scene.viewport?.height || 0) > 10000) throw new Error('The scene dimensions exceed the import limit');
+            if (Array.isArray(scene.assets) && scene.assets.length > 500) throw new Error('The scene contains too many assets');
+            const sceneState = { count: 0, maxDepth: 0 };
+            inspectScene(scene.root, 0, sceneState);
+            if (JSON.stringify(scene).length > 8_000_000) throw new Error('The scene is too large to import');
+          }
+          const capturedDiagnostics = scene?.diagnostics || metadata.diagnostics || [];
+          parent.postMessage({ pluginMessage: { type: 'import-scene', h2d: parsed, scene, diagnostics: capturedDiagnostics } }, '*');
+          const warningCount = Array.isArray(capturedDiagnostics) ? capturedDiagnostics.length : 0;
+          status.textContent = warningCount
+            ? `Importing editable layers... ${warningCount} captured style/resource warnings will be reported.`
+            : 'Importing editable layers...';
+        } catch (error) {
+          status.textContent = error.message || 'Import failed';
+        }
+      };
+      function formatGeometryMismatch(mismatch) {
+        if (!mismatch) return '';
+        const expected = mismatch.expected || {};
+        const actual = mismatch.actual || {};
+        const delta = mismatch.positionDelta || {};
+        const sizeDelta = mismatch.sizeDelta || {};
+        const label = mismatch.label || mismatch.id || 'unknown node';
+        return `${label}: expected (${Number(expected.x || 0).toFixed(1)}, ${Number(expected.y || 0).toFixed(1)}) ${Number(expected.width || 0).toFixed(1)}x${Number(expected.height || 0).toFixed(1)}; actual (${Number(actual.x || 0).toFixed(1)}, ${Number(actual.y || 0).toFixed(1)}) ${Number(actual.width || 0).toFixed(1)}x${Number(actual.height || 0).toFixed(1)}; delta (${Number(delta.x || 0).toFixed(1)}, ${Number(delta.y || 0).toFixed(1)}) size (${Number(sizeDelta.width || 0).toFixed(1)}, ${Number(sizeDelta.height || 0).toFixed(1)})`;
+      }
+      onmessage = (event) => {
+        if (event.data.pluginMessage?.type === 'import-progress') {
+          const progress = event.data.pluginMessage;
+          const created = Number(progress.created || 0);
+          const total = Number(progress.total || 0);
+          if (progress.phase === 'settling') {
+            status.textContent = 'Finishing editable layer layout...';
+          } else if (total > 0) {
+            const node = progress.nodeId ? ` (${progress.nodeType || 'node'}: ${progress.nodeId})` : '';
+            status.textContent = `Creating editable layers... ${Math.min(created, total)}/${total}${node}`;
+          }
+        }
+        if (event.data.pluginMessage?.type === 'page-info') {
+          const info = event.data.pluginMessage;
+          status.textContent = `Current page: ${info.count || 0} top-level layers. Paste Figma-compatible HTML into the field below.`;
+        }
+        if (event.data.pluginMessage?.type === 'import-complete') {
+          const report = event.data.pluginMessage.report || {};
+          const locks = report.geometryLocks || 0;
+          const maxDelta = Number(report.maxGeometryDelta || 0);
+          const flowNudges = report.flowNudges || 0;
+          const maxFlowNudge = Number(report.maxFlowNudge || 0);
+          const resizes = report.geometryResizes || 0;
+          const maxResize = Number(report.maxGeometryResize || 0);
+          const mismatches = report.geometryMismatches || 0;
+          const maxMeasured = Number(report.maxMeasuredDelta || 0);
+          const maxMeasuredSize = Number(report.maxMeasuredSizeDelta || 0);
+          const preMismatches = report.preCorrectionMismatches || 0;
+          const fontFallbacks = report.fontFallbacks || 0;
+          const degradations = report.styleDegradations || 0;
+          const sizingFallbacks = report.sizingFallbacks || 0;
+          const largestSizingFallback = (report.sizingFallbackNodes || []).reduce((largest, entry) => {
+            const delta = Math.max(Number(entry.widthDelta || 0), Number(entry.heightDelta || 0));
+            const largestDelta = largest
+              ? Math.max(Number(largest.widthDelta || 0), Number(largest.heightDelta || 0))
+              : -1;
+            return delta > largestDelta ? entry : largest;
+          }, null);
+          const capturedDiagnostics = report.capturedDiagnostics || 0;
+          const visualSnapshot = report.visualSnapshot;
+          const suffix = fontFallbacks ? `; ${fontFallbacks} text layers used a font fallback` : '';
+          const degradationSuffix = degradations ? `; ${degradations} style conversion notes` : '';
+          const sizingSuffix = sizingFallbacks
+            ? `; ${sizingFallbacks} sizing constraints kept fixed for fidelity${largestSizingFallback ? ` (largest ${largestSizingFallback.id}/${largestSizingFallback.kind}: ${Number(largestSizingFallback.actualWidth || 0).toFixed(1)}x${Number(largestSizingFallback.actualHeight || 0).toFixed(1)} vs ${Number(largestSizingFallback.expectedWidth || 0).toFixed(1)}x${Number(largestSizingFallback.expectedHeight || 0).toFixed(1)})` : ''}`
+            : '';
+          const diagnosticSuffix = capturedDiagnostics ? `; ${capturedDiagnostics} captured warnings` : '';
+          const limitedGeometrySuffix = report.geometryCorrectionLimited
+            ? `; large page used ${Number(report.geometryCorrectionPasses || 2)} bounded geometry passes`
+            : '';
+          const visualSnapshotSuffix = visualSnapshot ? '; captured geometry locked for fidelity' : '';
+          const flowNudgeSuffix = flowNudges
+            ? `; ${flowNudges} flow layers visually aligned while retaining Auto Layout${maxFlowNudge ? ` (max ${maxFlowNudge.toFixed(1)}px)` : ''}`
+            : '';
+          const geometrySuffix = mismatches
+            ? `; ${mismatches} measured geometry differences (max ${Math.max(maxMeasured, maxMeasuredSize).toFixed(1)}px)`
+            : '';
+          const correctedSuffix = preMismatches > mismatches
+            ? `; ${preMismatches - mismatches} geometry differences corrected`
+            : '';
+          status.textContent = locks
+            ? `Imported editable layers. ${locks} layers keep measured positions${maxDelta ? ` (max ${maxDelta.toFixed(1)}px)` : ''}${flowNudgeSuffix}${resizes ? `; ${resizes} sizes fixed${maxResize ? ` (max ${maxResize.toFixed(1)}px)` : ''}` : ''}${correctedSuffix}${geometrySuffix}${suffix}${degradationSuffix}${sizingSuffix}${diagnosticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`
+            : resizes
+              ? `Imported editable layers. ${resizes} sizes fixed${maxResize ? ` (max ${maxResize.toFixed(1)}px)` : ''}${flowNudgeSuffix}${correctedSuffix}${geometrySuffix}${suffix}${degradationSuffix}${sizingSuffix}${diagnosticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix} to match the captured page.`
+              : fontFallbacks
+                ? `Imported editable layers${flowNudgeSuffix}; ${fontFallbacks} text layers used a font fallback${correctedSuffix}${geometrySuffix}${degradationSuffix}${sizingSuffix}${diagnosticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`
+                : `Imported editable layers${flowNudgeSuffix}${correctedSuffix}${geometrySuffix}${degradationSuffix}${sizingSuffix}${diagnosticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`;
+          const diagnostics = document.getElementById('diagnostics');
+          const worst = report.worstGeometryMismatch || (report.geometryMismatchNodes || [])[0];
+          if (diagnostics && (worst || report.styleDegradationNodes?.length || report.sizingFallbackNodes?.length || report.fontFallbacks || report.capturedDiagnosticNodes?.length)) {
+            const lines = [];
+            if (worst) lines.push(`Largest remaining geometry difference\n${formatGeometryMismatch(worst)}`);
+            if (report.fontFallbacks) {
+              const details = (report.fontFallbackNodes || []).slice(0, 5)
+                .map(entry => `${entry.id}: ${entry.requested} -> ${entry.resolved}`)
+                .join('\n');
+              lines.push(`${report.fontFallbacks} text layer(s) used a fallback font.${details ? `\n${details}` : ''}`);
+            }
+            if (report.styleDegradationNodes?.length) {
+              const details = report.styleDegradationNodes.slice(0, 5)
+                .map(entry => `${entry.id}: ${entry.message}`)
+                .join('\n');
+              lines.push(`${report.styleDegradationNodes.length} style conversion note(s).${details ? `\n${details}` : ''}`);
+            }
+            if (report.sizingFallbackNodes?.length) {
+              const details = report.sizingFallbackNodes.slice().sort((left, right) => (
+                Math.max(Number(right.widthDelta || 0), Number(right.heightDelta || 0))
+                - Math.max(Number(left.widthDelta || 0), Number(left.heightDelta || 0))
+              )).slice(0, 20)
+                .map(entry => `${entry.id}: ${entry.kind}; requested ${entry.desiredWidth || entry.desiredCounter || 'fixed'} x ${entry.desiredHeight || entry.desiredPrimary || 'fixed'}; delta ${Number(entry.widthDelta || 0).toFixed(1)} x ${Number(entry.heightDelta || 0).toFixed(1)}${entry.siblingReflowed ? '; sibling reflowed' : ''}`)
+                .join('\n');
+              lines.push(`${report.sizingFallbacks} sizing constraint(s) stayed fixed to preserve measured geometry.\n${details}`);
+            }
+            if (report.capturedDiagnosticNodes?.length) {
+              const details = report.capturedDiagnosticNodes.slice(0, 5)
+                .map(entry => `${entry.nodeId || 'capture'}: ${entry.message || entry.code || 'warning'}`)
+                .join('\n');
+              lines.push(`Capture warnings\n${details}`);
+            }
+            diagnostics.textContent = lines.join('\n\n');
+            diagnostics.hidden = false;
+          } else if (diagnostics) {
+            diagnostics.textContent = '';
+            diagnostics.hidden = true;
+          }
+        }
+        if (event.data.pluginMessage?.type === 'import-error') {
+          status.textContent = event.data.pluginMessage.message;
+          const diagnostics = document.getElementById('diagnostics');
+          if (diagnostics) { diagnostics.textContent = ''; diagnostics.hidden = true; }
+        }
+      };
+      parent.postMessage({ pluginMessage: { type: 'inspect-page' } }, '*');
+
+      // Read accessible rich clipboard data without polling a local endpoint.
+      setTimeout(() => {
+        window.focus();
+        if (payload.value) return;
+        void readClipboardHtml();
+      }, 150);
+    </script>
+  </body>
+</html>

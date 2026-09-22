@@ -1,0 +1,4 @@
+interface:
+  display_name: "Open Canvas"
+  short_description: "Generate mobile interfaces into the local visual board"
+  default_prompt: "Use $ai-page-board to generate a mobile interface and add it to the current Open Canvas Board."

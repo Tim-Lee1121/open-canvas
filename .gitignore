@@ -1,0 +1,14 @@
+node_modules
+dist
+.pnpm-store/
+*.tsbuildinfo
+coverage
+.DS_Store
+*.local
+.env
+.env.*
+!.env.example
+data/*.tmp
+data/board-state.json
+generated-pages/*/
+!generated-pages/demo/

@@ -1,0 +1,14 @@
+{
+  "name": "Open Canvas Importer",
+  "id": "neuxmind-canvas-importer-v2",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["http://localhost:5183"],
+    "reasoning": "Read a one-use paired HTML export from the local Open Canvas bridge when Figma's plugin sandbox cannot expose the system HTML clipboard."
+  }
+}
