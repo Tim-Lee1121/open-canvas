@@ -3,8 +3,8 @@
   <body style="font: 12px Inter, sans-serif; padding: 16px; color: #1f2937; background: #ffffff">
     <h2 style="margin: 0 0 8px">Open Canvas Importer</h2>
     <p id="status" style="min-height: 32px; line-height: 1.35">Paste Figma-compatible HTML from Open Canvas, or enter its one-use pairing code.</p>
-    <label for="pairing-code">Pairing code (5 minutes, one use)</label>
-    <input id="pairing-code" autocomplete="off" spellcheck="false" maxlength="32" style="width: 100%; box-sizing: border-box; margin: 5px 0" />
+    <label for="pairing-code">Pairing code (5 minutes, one use; copied custom-port codes include <code>@port</code>)</label>
+    <input id="pairing-code" autocomplete="off" spellcheck="false" maxlength="64" style="width: 100%; box-sizing: border-box; margin: 5px 0" />
     <button id="pair" type="button">Read paired export</button>
     <pre id="diagnostics" hidden style="white-space: pre-wrap; max-height: 150px; overflow: auto; padding: 8px; border-radius: 6px; background: #f3f4f6; color: #4b5563; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace"></pre>
     <textarea id="payload" aria-label="Figma-compatible HTML payload" style="width: 100%; height: 90px"></textarea>
@@ -17,8 +17,6 @@
       const payload = document.getElementById('payload');
       const readButton = document.getElementById('read');
       const pairingInput = document.getElementById('pairing-code');
-      const canvasBridgeUrls = ['http://localhost:5183/__codex_clipboard__'];
-
       function looksLikeH2D(value) {
         return /\(figmeta\)[\s\S]+\(\/figmeta\)/.test(value || '')
           && /\(figh2d\)[\s\S]+\(\/figh2d\)/.test(value || '');
@@ -56,13 +54,32 @@
         }
       }
 
+      function parsePairingInput(value) {
+        const match = String(value || '').trim().match(/^([0-9a-f]{32})(?:@(\d{1,5}))?$/i);
+        if (!match) return null;
+        const port = match[2] ? Number(match[2]) : null;
+        if (port !== null && (!Number.isInteger(port) || port < 1 || port > 65535)) return null;
+        return { code: match[1].toLowerCase(), port };
+      }
+
+      function bridgeUrlsForPort(port) {
+        const ports = port ? [port, 5200, 5183] : [5200, 5183];
+        return [...new Set(ports.flatMap(candidate => [
+          `http://localhost:${candidate}/__codex_clipboard__`,
+          // Figma's manifest validator accepts the named loopback host for
+          // development access; retain the numeric host as a best-effort
+          // fallback for environments where localhost resolves elsewhere.
+          `http://127.0.0.1:${candidate}/__codex_clipboard__`,
+        ]))];
+      }
+
       async function readCanvasBridge() {
-        const code = pairingInput.value.trim();
-        if (!/^[0-9a-f]{32}$/.test(code)) return false;
-        for (const bridgeUrl of canvasBridgeUrls) {
+        const parsed = parsePairingInput(pairingInput.value);
+        if (!parsed) return false;
+        for (const bridgeUrl of bridgeUrlsForPort(parsed.port)) {
           try {
             const response = await fetch(bridgeUrl, {
-              cache: 'no-store', headers: { 'X-Open-Canvas-Code': code }
+              cache: 'no-store', headers: { 'X-Open-Canvas-Code': parsed.code }
             });
             if (!response.ok) continue;
             const html = await response.text();
@@ -112,8 +129,8 @@
       }
 
       document.getElementById('pair').onclick = async () => {
-        if (!/^[0-9a-f]{32}$/.test(pairingInput.value.trim())) {
-          status.textContent = 'Enter the 32-character pairing code shown in Open Canvas.';
+        if (!parsePairingInput(pairingInput.value)) {
+          status.textContent = 'Enter the 32-character pairing code shown in Open Canvas, optionally followed by @port.';
           return;
         }
         status.textContent = 'Reading paired export...';
@@ -222,6 +239,13 @@
         } catch {}
         return null;
       }
+      const captureVisualFallbackCodes = new Set(['background-svg-fallback']);
+      function classifyCapturedDiagnostics(diagnostics) {
+        const entries = Array.isArray(diagnostics) ? diagnostics.filter(Boolean) : [];
+        const visualFallbacks = entries.filter(entry => captureVisualFallbackCodes.has(String(entry.code || '')));
+        const warnings = entries.filter(entry => !captureVisualFallbackCodes.has(String(entry.code || '')));
+        return { warnings, visualFallbacks };
+      }
       function inspectScene(node, depth, state) {
         if (!node || typeof node !== 'object') throw new Error('Invalid Open Canvas scene node');
         state.count += 1;
@@ -271,10 +295,12 @@
             if (JSON.stringify(scene).length > 8_000_000) throw new Error('The scene is too large to import');
           }
           const capturedDiagnostics = scene?.diagnostics || metadata.diagnostics || [];
-          parent.postMessage({ pluginMessage: { type: 'import-scene', h2d: parsed, scene, diagnostics: capturedDiagnostics } }, '*');
-          const warningCount = Array.isArray(capturedDiagnostics) ? capturedDiagnostics.length : 0;
-          status.textContent = warningCount
-            ? `Importing editable layers... ${warningCount} captured style/resource warnings will be reported.`
+          parent.postMessage({ pluginMessage: { type: 'import-scene', h2d: parsed, scene, metadata, diagnostics: capturedDiagnostics } }, '*');
+          const capturedSummary = classifyCapturedDiagnostics(capturedDiagnostics);
+          const warningCount = capturedSummary.warnings.length;
+          const fallbackCount = capturedSummary.visualFallbacks.length;
+          status.textContent = warningCount || fallbackCount
+            ? `Importing editable layers...${warningCount ? ` ${warningCount} captured style/resource warning(s) will be reported.` : ''}${fallbackCount ? ` ${fallbackCount} visual fallback(s) will be preserved.` : ''}`
             : 'Importing editable layers...';
         } catch (error) {
           status.textContent = error.message || 'Import failed';
@@ -320,6 +346,32 @@
           const fontFallbacks = report.fontFallbacks || 0;
           const degradations = report.styleDegradations || 0;
           const sizingFallbacks = report.sizingFallbacks || 0;
+          const lineHeightApplied = report.lineHeightApplied || 0;
+          const lineHeightFailures = report.lineHeightFailures || 0;
+          const lineHeightFallbacks = report.lineHeightFallbacks || 0;
+          const clipPathFallbacks = report.clipPathFallbacks || 0;
+          const vectorClipPathFallbacks = report.vectorClipPathFallbacks || 0;
+          const maskImageFallbacks = report.maskImageFallbacks || 0;
+          const textFilterFallbacks = report.textFilterFallbacks || 0;
+          const textOverflowFallbacks = report.textOverflowFallbacks || 0;
+          const textShapingFallbacks = report.textShapingFallbacks || 0;
+          const writingModeFallbacks = report.writingModeFallbacks || 0;
+          const lineHeightExpected = report.lineHeightExpected || 0;
+          const lineHeightReadBackNodes = Array.isArray(report.lineHeightReadBackNodes)
+            ? report.lineHeightReadBackNodes
+            : [];
+          const lineHeightReadBackMismatches = lineHeightReadBackNodes.filter(entry => (
+            String(entry?.unit || '').toUpperCase() !== 'PIXELS'
+            || !Number.isFinite(Number(entry?.actual))
+            || Math.abs(Number(entry.actual) - Number(entry.expected)) > 0.01
+          ));
+          const formatDiagnosticValue = value => {
+            if (value == null) return 'unavailable';
+            if (typeof value === 'object') {
+              try { return JSON.stringify(value); } catch { return '[unserializable]'; }
+            }
+            return String(value);
+          };
           const largestSizingFallback = (report.sizingFallbackNodes || []).reduce((largest, entry) => {
             const delta = Math.max(Number(entry.widthDelta || 0), Number(entry.heightDelta || 0));
             const largestDelta = largest
@@ -327,14 +379,75 @@
               : -1;
             return delta > largestDelta ? entry : largest;
           }, null);
+          const sizingModeLabel = value => {
+            const normalized = String(value || '').toUpperCase();
+            return normalized === 'AUTO' ? 'HUG'
+              : normalized === 'HUG' || normalized === 'FILL' || normalized === 'FIXED'
+                ? normalized
+              : 'FIXED';
+          };
+          const sizingFallbackRequest = entry => {
+            const requestedWidth = entry.axis === 'width'
+              ? entry.desired
+              : (entry.desiredWidth || entry.desiredCounter);
+            const requestedHeight = entry.axis === 'height'
+              ? entry.desired
+              : (entry.desiredHeight || entry.desiredPrimary);
+            const width = sizingModeLabel(requestedWidth);
+            const height = sizingModeLabel(requestedHeight);
+            return `${width} x ${height}`;
+          };
           const capturedDiagnostics = report.capturedDiagnostics || 0;
+          const capturedVisualFallbacks = report.capturedVisualFallbacks || 0;
+          const semanticNodes = report.semanticNodes || 0;
+          const semanticNamedLayers = report.semanticNamedLayers || 0;
+          const layoutMetadataNodes = report.layoutMetadataNodes || 0;
+          const gridMetadataNodes = report.gridMetadataNodes || 0;
           const visualSnapshot = report.visualSnapshot;
           const suffix = fontFallbacks ? `; ${fontFallbacks} text layers used a font fallback` : '';
           const degradationSuffix = degradations ? `; ${degradations} style conversion notes` : '';
+          const writingModeSuffix = writingModeFallbacks ? `; ${writingModeFallbacks} vertical text visual fallback(s)` : '';
+          const textShapingSuffix = textShapingFallbacks ? `; ${textShapingFallbacks} text-shaping visual fallback(s)` : '';
           const sizingSuffix = sizingFallbacks
             ? `; ${sizingFallbacks} sizing constraints kept fixed for fidelity${largestSizingFallback ? ` (largest ${largestSizingFallback.id}/${largestSizingFallback.kind}: ${Number(largestSizingFallback.actualWidth || 0).toFixed(1)}x${Number(largestSizingFallback.actualHeight || 0).toFixed(1)} vs ${Number(largestSizingFallback.expectedWidth || 0).toFixed(1)}x${Number(largestSizingFallback.expectedHeight || 0).toFixed(1)})` : ''}`
             : '';
+          const lineHeightSuffix = lineHeightExpected
+            ? lineHeightFailures
+              ? `; line-heights ${lineHeightApplied}/${lineHeightExpected} applied, ${lineHeightFailures} failed${lineHeightFallbacks ? `, ${lineHeightFallbacks} visual fallback(s)` : ''}`
+              : `; line-heights ${lineHeightApplied}/${lineHeightExpected} applied${lineHeightFallbacks ? `, ${lineHeightFallbacks} visual fallback(s)` : ''}${lineHeightReadBackMismatches.length ? `, ${lineHeightReadBackMismatches.length} read-back mismatch(es)` : ''}`
+            : lineHeightFailures
+              ? `; ${lineHeightFailures} text line-heights failed${lineHeightFallbacks ? `, ${lineHeightFallbacks} visual fallback(s)` : ''}`
+              : '';
+          const clipPathSuffix = clipPathFallbacks
+            ? `; ${clipPathFallbacks} text clip-path visual fallback(s)`
+            : '';
+          const vectorClipPathSuffix = vectorClipPathFallbacks
+            ? `; ${vectorClipPathFallbacks} vector clip-path visual fallback(s)`
+            : '';
+          const maskImageSuffix = maskImageFallbacks
+            ? `; ${maskImageFallbacks} text mask-image visual fallback(s)`
+            : '';
+          const textFilterSuffix = textFilterFallbacks
+            ? `; ${textFilterFallbacks} text filter visual fallback(s)`
+            : '';
+          const textOverflowSuffix = textOverflowFallbacks
+            ? `; ${textOverflowFallbacks} text-overflow visual fallback(s)`
+            : '';
+          const fixedLayerSuffix = report.fixedLayersHoisted
+              ? `; ${report.fixedLayersHoisted} viewport-fixed layer(s) anchored to import root`
+            : '';
+          const fixedContainingBlockSuffix = report.fixedContainingBlocksHoisted
+            ? `; ${report.fixedContainingBlocksHoisted} ancestor-fixed layer(s) reparented to containing frames`
+            : '';
           const diagnosticSuffix = capturedDiagnostics ? `; ${capturedDiagnostics} captured warnings` : '';
+          const visualFallbackSuffix = capturedVisualFallbacks
+            ? `; ${capturedVisualFallbacks} vector background fallback(s) preserved`
+            : '';
+          const semanticSuffix = semanticNodes
+            ? `; semantics ${semanticNamedLayers}/${semanticNodes} named, ${layoutMetadataNodes} layout metadata${gridMetadataNodes ? ` (${gridMetadataNodes} Grid)` : ''}`
+            : layoutMetadataNodes
+              ? `; ${layoutMetadataNodes} layout metadata${gridMetadataNodes ? ` (${gridMetadataNodes} Grid)` : ''}`
+              : '';
           const limitedGeometrySuffix = report.geometryCorrectionLimited
             ? `; large page used ${Number(report.geometryCorrectionPasses || 2)} bounded geometry passes`
             : '';
@@ -344,20 +457,22 @@
             : '';
           const geometrySuffix = mismatches
             ? `; ${mismatches} measured geometry differences (max ${Math.max(maxMeasured, maxMeasuredSize).toFixed(1)}px)`
-            : '';
+            : report.geometryAudited
+              ? '; no remaining measured geometry differences'
+              : '';
           const correctedSuffix = preMismatches > mismatches
             ? `; ${preMismatches - mismatches} geometry differences corrected`
             : '';
           status.textContent = locks
-            ? `Imported editable layers. ${locks} layers keep measured positions${maxDelta ? ` (max ${maxDelta.toFixed(1)}px)` : ''}${flowNudgeSuffix}${resizes ? `; ${resizes} sizes fixed${maxResize ? ` (max ${maxResize.toFixed(1)}px)` : ''}` : ''}${correctedSuffix}${geometrySuffix}${suffix}${degradationSuffix}${sizingSuffix}${diagnosticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`
+            ? `Imported editable layers. ${locks} measured-position corrections applied${maxDelta ? ` (source drift max ${maxDelta.toFixed(1)}px)` : ''}${flowNudgeSuffix}${resizes ? `; ${resizes} sizes fixed${maxResize ? ` (max ${maxResize.toFixed(1)}px)` : ''}` : ''}${correctedSuffix}${geometrySuffix}${suffix}${degradationSuffix}${sizingSuffix}${lineHeightSuffix}${clipPathSuffix}${vectorClipPathSuffix}${maskImageSuffix}${textFilterSuffix}${textOverflowSuffix}${textShapingSuffix}${writingModeSuffix}${fixedLayerSuffix}${fixedContainingBlockSuffix}${diagnosticSuffix}${visualFallbackSuffix}${semanticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`
             : resizes
-              ? `Imported editable layers. ${resizes} sizes fixed${maxResize ? ` (max ${maxResize.toFixed(1)}px)` : ''}${flowNudgeSuffix}${correctedSuffix}${geometrySuffix}${suffix}${degradationSuffix}${sizingSuffix}${diagnosticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix} to match the captured page.`
+            ? `Imported editable layers. ${resizes} sizes fixed${maxResize ? ` (max ${maxResize.toFixed(1)}px)` : ''}${flowNudgeSuffix}${correctedSuffix}${geometrySuffix}${suffix}${degradationSuffix}${sizingSuffix}${lineHeightSuffix}${clipPathSuffix}${vectorClipPathSuffix}${maskImageSuffix}${textFilterSuffix}${textOverflowSuffix}${textShapingSuffix}${writingModeSuffix}${fixedLayerSuffix}${fixedContainingBlockSuffix}${diagnosticSuffix}${visualFallbackSuffix}${semanticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix} to match the captured page.`
               : fontFallbacks
-                ? `Imported editable layers${flowNudgeSuffix}; ${fontFallbacks} text layers used a font fallback${correctedSuffix}${geometrySuffix}${degradationSuffix}${sizingSuffix}${diagnosticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`
-                : `Imported editable layers${flowNudgeSuffix}${correctedSuffix}${geometrySuffix}${degradationSuffix}${sizingSuffix}${diagnosticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`;
+                ? `Imported editable layers${flowNudgeSuffix}; ${fontFallbacks} text layers used a font fallback${correctedSuffix}${geometrySuffix}${degradationSuffix}${sizingSuffix}${lineHeightSuffix}${clipPathSuffix}${vectorClipPathSuffix}${maskImageSuffix}${textFilterSuffix}${textOverflowSuffix}${textShapingSuffix}${writingModeSuffix}${fixedLayerSuffix}${fixedContainingBlockSuffix}${diagnosticSuffix}${visualFallbackSuffix}${semanticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`
+                : `Imported editable layers${flowNudgeSuffix}${correctedSuffix}${geometrySuffix}${suffix}${degradationSuffix}${sizingSuffix}${lineHeightSuffix}${clipPathSuffix}${vectorClipPathSuffix}${maskImageSuffix}${textFilterSuffix}${textOverflowSuffix}${textShapingSuffix}${writingModeSuffix}${fixedLayerSuffix}${fixedContainingBlockSuffix}${diagnosticSuffix}${visualFallbackSuffix}${semanticSuffix}${visualSnapshotSuffix}${limitedGeometrySuffix}.`;
           const diagnostics = document.getElementById('diagnostics');
           const worst = report.worstGeometryMismatch || (report.geometryMismatchNodes || [])[0];
-          if (diagnostics && (worst || report.styleDegradationNodes?.length || report.sizingFallbackNodes?.length || report.fontFallbacks || report.capturedDiagnosticNodes?.length)) {
+          if (diagnostics && (worst || report.styleDegradationNodes?.length || report.sizingFallbackNodes?.length || report.fontFallbacks || report.capturedDiagnosticNodes?.length || capturedVisualFallbacks || lineHeightFailures || lineHeightFallbacks || lineHeightReadBackMismatches.length || clipPathFallbacks || vectorClipPathFallbacks || maskImageFallbacks || textFilterFallbacks || textOverflowFallbacks || textShapingFallbacks || writingModeFallbacks)) {
             const lines = [];
             if (worst) lines.push(`Largest remaining geometry difference\n${formatGeometryMismatch(worst)}`);
             if (report.fontFallbacks) {
@@ -368,7 +483,10 @@
             }
             if (report.styleDegradationNodes?.length) {
               const details = report.styleDegradationNodes.slice(0, 5)
-                .map(entry => `${entry.id}: ${entry.message}`)
+                .map(entry => {
+                  const property = entry.property ? ` [${entry.property}: expected ${formatDiagnosticValue(entry.expected)}, actual ${formatDiagnosticValue(entry.actual)}]` : '';
+                  return `${entry.id}: ${entry.message}${property}`;
+                })
                 .join('\n');
               lines.push(`${report.styleDegradationNodes.length} style conversion note(s).${details ? `\n${details}` : ''}`);
             }
@@ -377,7 +495,7 @@
                 Math.max(Number(right.widthDelta || 0), Number(right.heightDelta || 0))
                 - Math.max(Number(left.widthDelta || 0), Number(left.heightDelta || 0))
               )).slice(0, 20)
-                .map(entry => `${entry.id}: ${entry.kind}; requested ${entry.desiredWidth || entry.desiredCounter || 'fixed'} x ${entry.desiredHeight || entry.desiredPrimary || 'fixed'}; delta ${Number(entry.widthDelta || 0).toFixed(1)} x ${Number(entry.heightDelta || 0).toFixed(1)}${entry.siblingReflowed ? '; sibling reflowed' : ''}`)
+                .map(entry => `${entry.id}: ${entry.kind}; requested ${sizingFallbackRequest(entry)}; delta ${Number(entry.widthDelta || 0).toFixed(1)} x ${Number(entry.heightDelta || 0).toFixed(1)}${entry.siblingReflowed ? '; sibling reflowed' : ''}${entry.message ? `; ${entry.message}` : ''}`)
                 .join('\n');
               lines.push(`${report.sizingFallbacks} sizing constraint(s) stayed fixed to preserve measured geometry.\n${details}`);
             }
@@ -386,6 +504,48 @@
                 .map(entry => `${entry.nodeId || 'capture'}: ${entry.message || entry.code || 'warning'}`)
                 .join('\n');
               lines.push(`Capture warnings\n${details}`);
+            }
+            if (capturedVisualFallbacks) {
+              const details = (report.capturedVisualFallbackNodes || []).slice(0, 5)
+                .map(entry => `${entry.nodeId || 'capture'}: ${entry.message || entry.code || 'visual fallback'}`)
+                .join('\n');
+              lines.push(`${capturedVisualFallbacks} vector background fallback(s) preserved.${details ? `\n${details}` : ''}`);
+            }
+            if (lineHeightFailures && report.lineHeightFailureNodes?.length) {
+              const details = report.lineHeightFailureNodes.slice(0, 5)
+                .map(entry => `${entry.id}: ${entry.message || 'line-height write failed'}`)
+                .join('\n');
+              lines.push(`${lineHeightFailures} text line-height write(s) failed.\n${details}`);
+            }
+            if (lineHeightFallbacks) {
+              lines.push(`${lineHeightFallbacks} text layer(s) use an absolute SVG visual fallback while keeping the original TextNode editable.`);
+            }
+            if (lineHeightReadBackMismatches.length) {
+              const details = lineHeightReadBackMismatches.slice(0, 5)
+                .map(entry => `${entry.id}: expected ${entry.expected}px, read back ${entry.actual ?? '?'}${entry.unit ? ` ${entry.unit}` : ''}`)
+                .join('\n');
+              lines.push(`${lineHeightReadBackMismatches.length} final line-height read-back mismatch(es).\n${details}`);
+            }
+            if (clipPathFallbacks) {
+              lines.push(`${clipPathFallbacks} text layer(s) use an absolute SVG clip-path fallback while keeping the original TextNode editable.`);
+            }
+            if (vectorClipPathFallbacks) {
+              lines.push(`${vectorClipPathFallbacks} vector layer(s) use an absolute SVG clip-path fallback while keeping the original vector editable.`);
+            }
+            if (maskImageFallbacks) {
+              lines.push(`${maskImageFallbacks} text layer(s) use an absolute SVG mask-image fallback while keeping the original TextNode editable.`);
+            }
+            if (textFilterFallbacks) {
+              lines.push(`${textFilterFallbacks} text layer(s) use an absolute SVG filter fallback while keeping the original TextNode editable.`);
+            }
+            if (textOverflowFallbacks) {
+              lines.push(`${textOverflowFallbacks} text layer(s) use an absolute SVG ellipsis fallback while keeping the original TextNode editable.`);
+            }
+            if (textShapingFallbacks) {
+              lines.push(`${textShapingFallbacks} text layer(s) use an absolute SVG shaping fallback while keeping the original TextNode editable.`);
+            }
+            if (writingModeFallbacks) {
+              lines.push(`${writingModeFallbacks} vertical-writing text layer(s) use an absolute SVG visual fallback while keeping the original TextNode editable.`);
             }
             diagnostics.textContent = lines.join('\n\n');
             diagnostics.hidden = false;

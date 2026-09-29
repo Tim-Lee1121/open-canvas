@@ -58,6 +58,11 @@ describe("WebMCP board tools", () => {
       "update_page",
       "move_page",
       "delete_page",
+      "list_design_systems",
+      "get_design_system",
+      "get_design_context",
+      "get_page_design_binding",
+      "validate_page_design",
     ]);
     expect(tools.get("list_boards")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.get("delete_page")?.annotations?.destructiveHint).toBe(true);
@@ -150,7 +155,7 @@ describe("WebMCP board tools", () => {
     const boardInput = Object.create({ layoutMode: "canvas", activate: false }) as Record<string, unknown>;
     boardInput.name = "Own board";
     const boardResult = data<{ boardId: string; board: { layoutMode: string } }>(await tools.get("create_board")?.execute(boardInput));
-    expect(boardResult.board.layoutMode).toBe("grid");
+    expect(boardResult.board.layoutMode).toBe("canvas");
     expect(getState().activeBoardId).not.toBe(activeBoardId);
     expect(getState().activeBoardId).toBe(boardResult.boardId);
 
@@ -262,7 +267,7 @@ describe("WebMCP registration", () => {
     try {
       const registration = registerWebMcpTools(runtime);
       expect(registration.supported).toBe(true);
-      expect(documentContext.registerTool).toHaveBeenCalledTimes(9);
+      expect(documentContext.registerTool).toHaveBeenCalledTimes(14);
       expect(navigatorContext.registerTool).not.toHaveBeenCalled();
       expect((documentContext.registerTool as ReturnType<typeof vi.fn>).mock.calls[0]).toHaveLength(1);
       registration.unregister();
@@ -287,7 +292,7 @@ describe("WebMCP registration", () => {
     const registration = registerWebMcpTools(runtime, { modelContext: context });
     expect(registration.supported).toBe(true);
     expect(registration.registered).toBe(true);
-    expect(registration.toolNames).toHaveLength(9);
+    expect(registration.toolNames).toHaveLength(14);
     registration.unregister();
     expect(callbacks.get("create_page")).toHaveBeenCalledTimes(1);
     registration.unregister();
@@ -321,9 +326,9 @@ describe("WebMCP registration", () => {
 
     expect(registration.pending).toBe(false);
     expect(registration.registered).toBe(false);
-    expect(registration.errors).toHaveLength(9);
+    expect(registration.errors).toHaveLength(14);
     expect(statuses.at(-1)).toMatchObject({ registered: false, pending: false });
-    expect(statuses.at(-1)?.errors).toHaveLength(9);
+    expect(statuses.at(-1)?.errors).toHaveLength(14);
   });
 
   it("reports whether a host error happened while registering or cleaning up", () => {

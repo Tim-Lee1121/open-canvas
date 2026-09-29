@@ -37,7 +37,7 @@ describe("project board state file", () => {
     await expect(readProjectState(filePath)).rejects.toThrow("not valid JSON");
 
     await writeFile(filePath, JSON.stringify({ schemaVersion: 99 }), "utf8");
-    await expect(readProjectState(filePath)).rejects.toThrow("does not match schema version 1");
+    await expect(readProjectState(filePath)).rejects.toThrow("does not match schema version 2");
   });
 
   it("returns a clean state when the project file does not exist", async () => {

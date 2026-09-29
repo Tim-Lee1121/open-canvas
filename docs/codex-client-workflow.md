@@ -60,12 +60,16 @@ and [Site tools](https://learn.chatgpt.com/docs/webmcp).
    Board, whose page count and canvas update automatically.
 6. Require the completion message to include the Board name, `boardId`,
    `pageId`, and generated source path.
-7. Before publishing, verify that each `data-icon` in the HTML has matching
+7. Before generation, resolve the project/Board/Page Design System binding with
+   `npm run board -- get-design-context`; include only the returned bounded
+   context bundle in the generation task. Report the resolved system, version,
+   digest, theme, and validation status.
+8. Before publishing, verify that each `data-icon` in the HTML has matching
    inline and standalone SVG path data under `assets/icons/`.
-8. Use Annotation mode in the built-in browser for element-level comments,
+9. Use Annotation mode in the built-in browser for element-level comments,
    then return to the project conversation and invoke the Skill for the next
    revision.
-9. When an HTML page is ready for design handoff, click `Export for Figma` in its
+10. When an HTML page is ready for design handoff, click `Export for Figma` in its
    Canvas toolbar, then paste directly on a blank Figma design canvas. The
    Open Canvas's independently implemented Figma-compatible clipboard payload
    may create editable layers in some Figma Desktop versions without opening
@@ -77,7 +81,7 @@ and [Site tools](https://learn.chatgpt.com/docs/webmcp).
    official extension's `Capture page` or
    `Capture element` action instead.
    See [`figma-browser-plugin.md`](figma-browser-plugin.md) for details.
-10. For a revision, confirm that only the generated page source, its icon
+11. For a revision, confirm that only the generated page source, its icon
    assets, and its Board record changed. The distributed workbench source must
    remain untouched; explicit host-product requests must be declined.
 

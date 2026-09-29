@@ -1,4 +1,4 @@
-import type { Board, LayoutMode, Page, PageSource } from "../domain/model";
+import type { Board, Page, PageSource } from "../domain/model";
 import type { DeviceFrame } from "./device-presets";
 
 export type PagesById = Record<string, Page>;
@@ -34,9 +34,4 @@ export interface BaseViewProps extends PageActionProps {
   selectedPageId?: string | null;
   boards?: Board[];
   activeBoardId?: string;
-}
-
-export interface LayoutModeControlProps {
-  mode: LayoutMode;
-  onChange: (mode: LayoutMode) => void;
 }

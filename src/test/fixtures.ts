@@ -25,7 +25,7 @@ export function createSeedState(): AppState {
       id: boardOneId,
       name: "Explorations",
       pageIds: [pageOneId, pageTwoId],
-      layoutMode: "grid",
+      layoutMode: "canvas",
       createdAt,
       updatedAt: createdAt,
     },

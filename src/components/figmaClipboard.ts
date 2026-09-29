@@ -30,8 +30,16 @@ function requiresSystemClipboardBridge(): boolean {
   // embedded previews, but it must not be required on the normal app route.
   if (typeof window === "undefined") return false;
   const localHost = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
-  const isCanvasDevServer = window.location.port === "5183";
-  return localHost && (isCanvasDevServer || Boolean(document.querySelector('meta[name="codex-annotation-server"]')));
+  // The Canvas dev server may run on any dynamically selected local port. The
+  // clipboard endpoint is origin-local, so limiting this to a short allowlist
+  // silently bypasses the plugin scene bridge and drops Open Canvas-only
+  // metadata such as resolved text line-height or Auto Layout constraints.
+  // A failed POST still falls back to the browser clipboard, so probing the
+  // same-origin endpoint is safe for a loopback Canvas preview.
+  const isCanvasDocument = Boolean(document.querySelector("#root"));
+  const hasViteBridgeMarker = Boolean(document.querySelector('meta[name="codex-annotation-server"]'));
+  const isKnownCanvasPort = window.location.port === "5183" || window.location.port === "5200";
+  return localHost && (isKnownCanvasPort || hasViteBridgeMarker || isCanvasDocument);
 }
 
 async function copyHtmlThroughLocalBridge(html: string, pluginHtml: string): Promise<string | null> {
@@ -46,7 +54,16 @@ async function copyHtmlThroughLocalBridge(html: string, pluginHtml: string): Pro
     });
     if (!response.ok) return null;
     const result = await response.json() as { pairingCode?: string };
-    return result.pairingCode && /^[0-9a-f]{32}$/.test(result.pairingCode) ? result.pairingCode : null;
+    if (!result.pairingCode || !/^[0-9a-f]{32}$/.test(result.pairingCode)) return null;
+    // The importer historically probes the two stable development ports. When
+    // PORT is overridden, carry the loopback port in the copied transport
+    // value so the plugin can reach the same one-use payload without weakening
+    // the server's loopback/header validation. The visible default remains a
+    // plain 32-character code for backwards compatibility.
+    const port = Number.parseInt(window.location.port, 10);
+    return Number.isInteger(port) && port > 0 && ![5183, 5200].includes(port)
+      ? `${result.pairingCode}@${port}`
+      : result.pairingCode;
   } catch {
     return null;
   }
@@ -181,7 +198,12 @@ export async function copyPageToFigmaClipboard(page: Page, deviceFrame?: DeviceF
       throw new FigmaExportError("capture-failed", `The HTML page could not be prepared for Figma${detail}`, { cause: error });
     });
   const htmlPromise = scenePromise.then((scene) => wrapFigmaClipboardHtml(scene));
-  const pluginHtmlPromise = scenePromise.then((scene) => buildFigmaHtml(scene));
+  // Keep the plugin bridge's H2D compatibility channel as explicit as the
+  // native clipboard channel. The lossless scene marker is still present for
+  // the Open Canvas plugin, but if a host/bridge falls back to H2D (or trims
+  // the scene marker) every text run retains an inline pixel line-height
+  // wrapper instead of reverting to Figma's AUTO leading.
+  const pluginHtmlPromise = scenePromise.then((scene) => buildFigmaHtml(scene, { forceLineHeightWrappers: true }));
   return writeRichClipboard(htmlPromise, pluginHtmlPromise);
 }
 

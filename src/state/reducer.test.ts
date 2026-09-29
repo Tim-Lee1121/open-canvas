@@ -190,19 +190,18 @@ describe("appReducer", () => {
     expect(inserted.boards[0].pageIds).toEqual([second, "page-inserted", first]);
   });
 
-  it("updates canvas coordinates and per-board layout mode", () => {
+  it("updates canvas coordinates and preserves Canvas-only board state", () => {
     const seed = createSeedState();
     const board = seed.boards[0];
     const pageId = board.pageIds[0];
     const positioned = reduce(seed, actions.updateCanvasPosition(pageId, { x: 123.5, y: 456 }));
     expect(positioned.pagesById[pageId].canvasPosition).toEqual({ x: 123.5, y: 456 });
     expect(positioned.boards[0].updatedAt).toBe(positioned.pagesById[pageId].updatedAt);
-    const canvas = reduce(positioned, actions.setLayoutMode(board.id, "canvas"));
+    const canvas = positioned;
     expect(canvas.boards.find((item) => item.id === board.id)?.layoutMode).toBe("canvas");
     expect(canvas.boards.find((item) => item.id === seed.boards[1].id)?.layoutMode).toBe("canvas");
     // Invalid references/values are safe no-ops.
     expect(reduce(canvas, actions.updateCanvasPosition("missing", { x: 1, y: 1 }))).toBe(canvas);
-    expect(reduce(canvas, actions.setLayoutMode("missing", "grid"))).toBe(canvas);
   });
 
   it("places newly created pages in a horizontal sequence", () => {

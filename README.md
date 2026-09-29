@@ -2,7 +2,7 @@
 
 Local-first workspace for generating, organizing, annotating, and preparing AI-built mobile interfaces for Figma workflows.
 
-当前版本：**1.23**（首个公开发行尚未完成验收）
+当前版本：**1.24**（能力版本，公开仓库持续维护）
 
 Open Canvas 是独立的开源项目，并非 OpenAI 或 Figma 的官方产品或合作项目。项目采用 [Apache-2.0](LICENSE) 许可证；第三方声明见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
 
@@ -29,16 +29,28 @@ Open Canvas 是一个与 Codex 本地项目协同的 React 工作台，用来集
 ## 功能
 
 - 多个 Boards：可在左侧栏手动创建、重命名和删除 Board，并在 Boards 之间迁移页面。
-- Grid 视图：按页面顺序查看卡片，并支持板内排序。
-- Canvas 视图：在整页画布中自由摆放页面卡片，支持快捷尺寸和任意自定义宽高作为制作参考。
+- Canvas 视图：唯一的页面展示与画布操作视图，在整页画布中自由摆放页面卡片，支持快捷尺寸和任意自定义宽高作为制作参考。
+- Design System 工作区：项目级查看 DGA provider 的 Overview、Tokens、Components、Patterns、Validation，并输出可追溯的生成上下文。
 - Canvas Tags：通过画布上的 **Add Tag** 添加黄色便签，可拖动到任意位置；双击编辑文字。选中 Tag 后显示与 Figma 对齐的工具栏，可切换黄色、蓝色、粉色，移动到其他 Board、复制文本、删除或拖动右下角手柄调整尺寸。
 - 页面管理：查看 URL/HTML 预览、重命名、移动到其他画板和删除。
 - Codex 客户端 Skill：在本地项目中生成 HTML，通过校验后写入共享画板数据。
+- AI 客户端兼容：Codex 为主工作流；WorkBuddy 与 Trea Work 可将仓库作为本地项目，通过同一套 `pnpm board` CLI、开发服务器和校验命令协同使用。详见 [`docs/ai-client-compatibility.md`](docs/ai-client-compatibility.md)。
 - 页面图标资产：生成页面使用内嵌 SVG path，并在页面目录的 `assets/icons/` 保存对应的独立 SVG 文件。
 - Figma 互操作：HTML 页面可生成独立实现的 Figma-compatible 富文本载荷；部分 Figma Desktop 版本可能将其识别为可编辑图层，也可尝试使用本地开发插件导入场景模型。两条路径尚待真实 Desktop 复验，不属于稳定导出承诺。URL 页面继续使用 Figma 官方扩展的 `Capture page`。
 - 项目数据同步：Vite 通过本地状态接口读取项目目录外的 Board 数据，客户端生成后已打开的画板会自动更新。
 - Codex WebMCP：代码保留作为可选兼容入口，默认不向浏览器注册，避免在浏览器对话中执行生成。
 - Codex 标注：生成的 HTML 以同文档节点呈现，可在 Codex 浏览器 Annotation mode 中直接选择元素。
+
+## 能力版本与 AI 客户端
+
+当前能力版本覆盖四条链路：
+
+1. **生成与组织**：通过仓库 Skill 或 CLI 创建、更新、移动和删除 HTML/URL 页面，并把页面放入稳定的 Board。
+2. **Design System 上下文**：以 provider manifest、版本、digest、theme、tokens、components、patterns 和验证结果作为受限上下文，支持项目/Board/Page 绑定。
+3. **评审与标注**：Canvas、Design System 工作区、同文档 HTML 预览和可选 WebMCP/Annotation mode。
+4. **Figma 交付**：独立的 Figma-compatible HTML 载荷和本地 Importer；复杂 CSS、字体、跨域资源与 Figma Desktop 回流仍可能降级。
+
+WorkBuddy 与 Trea Work 当前通过本地项目工作流接入上述 CLI 能力；它们不是仓库内置的官方插件，也不会自动获得 Codex 的 Skill、浏览器 Annotation 或 Figma 权限。接入范围和安全边界见 [`docs/ai-client-compatibility.md`](docs/ai-client-compatibility.md)。
 
 ## 环境要求
 
@@ -82,11 +94,12 @@ npm run preview
 ## 基本使用
 
 1. 在左侧 **Boards** 选择 Board；列表会显示页面数量，点击 `+` 可手动创建 Board。
-2. 使用侧栏或画板顶部切换 `Grid` / `Canvas`。
+2. 使用侧栏选择 `Canvas` 或项目级 `Design System` 工作区；Canvas 是默认页面视图。
 3. Canvas 视图中，通过卡片工具栏选择快捷尺寸，或输入自定义 `W / H`；尺寸只作为预览参考，不会改写页面内容。拖动卡片可调整位置，使用“适配全部”查看全部页面。
-4. 使用页面卡片的 `Rename`、`Move to` 和 `Delete` 管理已有页面。
-5. 在 Codex 内建浏览器中开启 Annotation mode，直接选择生成页面内的元素。
-6. 标注完成后，回到 Codex 项目对话，调用 `$ai-page-board` 根据评论更新页面。
+4. 在 Design System 工作区查看 provider、主题、tokens、组件、patterns 和页面验证状态。
+5. 使用页面卡片的 `Rename`、`Move to` 和 `Delete` 管理已有页面。
+6. 在 Codex 内建浏览器中开启 Annotation mode，直接选择生成页面内的元素。
+7. 标注完成后，回到 Codex 项目对话，调用 `$ai-page-board` 根据评论更新页面。
 
 ## Figma 浏览器插件
 
@@ -120,6 +133,8 @@ Skill 会在 Codex 的本地任务里查找 Boards、生成 `generated-pages/<pa
 
 WebMCP 是页面所属的 Site tools，因此默认关闭浏览器工具注册，保证生成发生在 Codex 客户端项目任务内。只在需要兼容旧流程时，手工设置 `VITE_ENABLE_BROWSER_TOOLS=true` 并重启 Vite；此时仍需顶层文档支持 `document.modelContext.registerTool`。
 
+Design System registry 保存在项目外的 `.open-canvas-data/<项目名>-<路径哈希>/design-system-registry.json`。首期 provider 为 `$dga-design-system`；注册、绑定和生成上下文使用 CLI，浏览器仅提供只读查询工具：`list_design_systems`、`get_design_system`、`get_design_context`、`get_page_design_binding` 和 `validate_page_design`。页面没有绑定时显示 `Unbound`，不会自动声称符合 DGA。
+
 HTML 页面会以同文档 DOM 呈现，便于 Codex 浏览器识别并标注其中的元素。URL 页面使用隔离的 iframe；如果目标站点禁止嵌入，可通过卡片的外部链接打开原地址。标注由 Codex 浏览器管理，不会写入画板数据。
 
 ## 数据保存与重置
@@ -138,6 +153,7 @@ HTML 页面会以同文档 DOM 呈现，便于 Codex 浏览器识别并标注其
 
 - Figma 粘贴成为纯文本或没有内容：回到页面重新点击 `Export for Figma`，立即在 Figma 空白画布粘贴；中间的复制操作会覆盖系统剪贴板。
 - 插件无法读取 HTML：使用 Open Canvas 显示的 32 位配对码，在五分钟内点击 `Read paired export`；配对码仅可使用一次。若服务器使用非默认端口，插件的本地网络权限需要同步更新。
+- 原生 `Cmd/Ctrl+V` 后文字行距或 Auto Layout 约束仍缺失：载荷会为带已解析行距的匿名文本补充显式 inline `SPAN`，但原生 H2D 仍受 Figma Desktop 版本能力限制。运行在本地 Canvas 时，导出通知会显示一次性配对码；改用 `Open Canvas Importer` 输入该配对码，可导入完整 scene 并保留行距/约束，再检查报告中的 `line-heights X/Y applied` 与 sizing/geometry 降级信息。
 - 页面未出现：确认 `pnpm dev` 正在运行、`board` CLI 成功返回，以及浏览器访问的是 `127.0.0.1:5183`。
 - 图片或字体降级：查看插件导入报告；跨域图片、不可用字体和复杂 CSS 无法保证精确转换。
 

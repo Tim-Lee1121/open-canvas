@@ -8,7 +8,7 @@
   "documentAccess": "dynamic-page",
   "networkAccess": {
     "allowedDomains": ["none"],
-    "devAllowedDomains": ["http://localhost:5183"],
+    "devAllowedDomains": ["http://localhost:5183", "http://localhost:5200"],
     "reasoning": "Read a one-use paired HTML export from the local Open Canvas bridge when Figma's plugin sandbox cannot expose the system HTML clipboard."
   }
 }

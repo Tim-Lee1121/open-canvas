@@ -87,6 +87,18 @@ All selectors accept a stable ID (`boardId`) or a zero-based index
 | `move_page` | `{pageId, targetBoardId\|targetBoardIndex, targetIndex?}` | Source and target board IDs. Omit `targetIndex` to append. The same tool also reorders within a board. |
 | `delete_page` | `{pageId}` | Deleted `pageId` and its board ID. |
 
+Design System read-only tools:
+
+| Tool | Input | Result |
+| --- | --- | --- |
+| `list_design_systems` | `{}` | Registered provider IDs, versions, themes, and readiness summaries. |
+| `get_design_system` | `{systemId}` | Bounded provider manifest and source references; never the full knowledge base. |
+| `get_design_context` | `{intent?, theme?}` | Minimal context bundle for generation, including tokens, patterns, hard stops, readiness, and provenance. |
+| `get_page_design_binding` | `{pageId}` | Page metadata binding or `Unbound`. |
+| `validate_page_design` | `{pageId}` | Static binding, marker, theme, provenance, semantic, and readiness result. |
+
+Provider registration and project/Board/Page binding are consequential filesystem operations and remain CLI-only (`register-design-system`, `bind-design-system`).
+
 URLs must use `http` or `https`. HTML and titles are bounded by the domain
 limits (`1,000,000` characters for HTML and `240` for a title). Coordinates
 must be finite numbers. Unknown or malformed arguments return `ok: false`

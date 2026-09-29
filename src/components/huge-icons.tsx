@@ -29,6 +29,7 @@ import {
   Menu01Icon,
   MessageSquareTextIcon,
   MoreHorizontalIcon,
+  Moon01Icon,
   MoveToIcon,
   PanelRightOpenIcon,
   PencilEdit01Icon,
@@ -36,6 +37,7 @@ import {
   SaveIcon,
   ScanIcon,
   SparklesIcon,
+  Sun01Icon,
   SmartPhone01Icon,
   Tick02Icon,
   TriangleAlertIcon,
@@ -91,6 +93,7 @@ export const LayoutGrid = createIcon(LayoutGridIcon, "LayoutGrid");
 export const Loader2 = createIcon(LoaderIcon, "Loader2");
 export const Menu = createIcon(Menu01Icon, "Menu");
 export const MoreHorizontal = createIcon(MoreHorizontalIcon, "MoreHorizontal");
+export const Moon = createIcon(Moon01Icon, "Moon");
 export const MoveRight = createIcon(MoveToIcon, "MoveRight");
 // Figma's collapse glyph has a right-hand divider and a left-facing chevron.
 export const PanelLeftClose = createIcon(PanelRightOpenIcon, "PanelLeftClose");
@@ -100,6 +103,7 @@ export const RefreshCw = createIcon(RefreshIcon, "RefreshCw");
 export const Save = createIcon(SaveIcon, "Save");
 export const Scan = createIcon(ScanIcon, "Scan");
 export const Sparkles = createIcon(SparklesIcon, "Sparkles");
+export const Sun = createIcon(Sun01Icon, "Sun");
 export const Trash2 = createIcon(Delete01Icon, "Trash2");
 export const WandSparkles = createIcon(WandSparklesIcon, "WandSparkles");
 export const X = createIcon(Cancel01Icon, "X");
@@ -109,6 +113,7 @@ export const ZoomOut = createIcon(ZoomOutIcon, "ZoomOut");
 // Canvas-only affordances use names that describe the product action directly.
 export const PageSize = createIcon(SmartPhone01Icon, "PageSize");
 export const DesktopSize = createIcon(ComputerIcon, "DesktopSize");
+export const Computer = createIcon(ComputerIcon, "Computer");
 export const MoveTo = createIcon(ArchiveArrowUpIcon, "MoveTo");
 export const Trash = createIcon(Delete01Icon, "Trash");
 export const Tag = createIcon(Tag01Icon, "Tag");

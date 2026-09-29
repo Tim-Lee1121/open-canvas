@@ -137,8 +137,11 @@ function canvasGridDotColor(zoom: number): string {
   const opacity = Math.min(1, Math.max(0,
     (zoom - CANVAS_GRID_FADE_START) / (CANVAS_GRID_FADE_END - CANVAS_GRID_FADE_START),
   ));
-  if (opacity >= 1) return "#C6C6CB";
-  return `rgba(198, 198, 203, ${Number(opacity.toFixed(3))})`;
+  const isDark = typeof document !== "undefined" && document.documentElement.dataset.theme === "dark";
+  const base = isDark ? "#6b6b70" : "#C6C6CB";
+  if (opacity >= 1) return base;
+  const [red, green, blue] = isDark ? [107, 107, 112] : [198, 198, 203];
+  return `rgba(${red}, ${green}, ${blue}, ${Number(opacity.toFixed(3))})`;
 }
 
 function readSafeInsets(viewport: HTMLElement): SafeInsets {

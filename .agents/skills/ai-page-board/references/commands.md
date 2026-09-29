@@ -9,6 +9,9 @@ file.
 ```bash
 npm run board -- list-boards
 npm run board -- list-pages --board-id <board-id>
+npm run board -- list-design-systems
+npm run board -- inspect-design-system --system-id <system-id>
+npm run board -- get-design-context --board-id <board-id> --intent "data workspace"
 ```
 
 `--board-index <number>` may replace `--board-id`, but keep using stable IDs
@@ -34,7 +37,9 @@ npm run board -- export-page --page-id <page-id> --output generated-pages/screen
 Creation also accepts `--index`, `--x`, `--y`, and `--no-select`. Position
 updates require both `--x` and `--y`. `--url` accepts only HTTP(S) URLs.
 Successful creation returns both `boardName` and `boardId`; include both with
-the returned `pageId` in the completion message.
+the returned `pageId` in the completion message. Design System bindings are
+managed with `register-design-system`, `bind-design-system`, and
+`validate-page-design`; generation should consume `get-design-context` first.
 
 For HTML sources, the CLI validates that every SVG icon has a lowercase
 kebab-case `data-icon`, `viewBox`, and path-only geometry. It rejects SVG
@@ -54,7 +59,8 @@ npm run board -- delete-board --board-id <board-id>
 The last board cannot be deleted. Deleting a non-empty board requires
 `--target-board-id <board-id>` (or `--target-board-index <number>`) so pages are
 migrated atomically. Creation accepts `--no-activate` and either `canvas` or
-`grid` for `--layout-mode`.
+`grid` for `--layout-mode` is accepted only as a legacy no-op; new boards are
+always Canvas-only.
 
 Boards can also be created manually with the `+` control beside **Boards** in
 the left sidebar. Refresh `list-boards` after a manual creation before choosing

@@ -20,7 +20,7 @@ Open Canvas 的 HTML 页面可生成一种独立实现的、best-effort 的 Figm
 
 1. 在 Canvas 中打开目标 Board，确认页面预览和页面尺寸参考正确。
 2. 在 HTML 页面卡片上方点击 `Export for Figma`。Canvas 会按当前设备尺寸（例如 375 × 980）渲染隐藏捕获文档，等待字体、图片和布局稳定后生成 Figma-compatible 富文本载荷；不会打开额外全屏预览。这样可以保持页面的响应式断点和实际画板尺寸一致。
-3. 在 Figma 设计文件的空白画布上直接按 `Cmd/Ctrl+V`。支持的 Figma Desktop 版本可将 H2D 导入为可编辑图层；实际效果取决于版本、字体及页面样式。需要详细降级报告时，在 Figma 的 `Plugins > Development > Import plugin from manifest…` 选择 `figma-plugin/manifest.json`，运行 `Open Canvas Importer`。如果插件无法读取系统 HTML 剪贴板，在 Open Canvas 复制后，将界面显示的一次性配对码输入插件并点击 `Read paired export`，然后点击 `Import editable layers`。
+3. 在 Figma 设计文件的空白画布上直接按 `Cmd/Ctrl+V`。支持的 Figma Desktop 版本可将 H2D 导入为可编辑图层；实际效果取决于版本、字体及页面样式，原生 H2D 粘贴尤其可能忽略部分 Auto Layout 约束或行距。为减少 Desktop 忽略裸 `TEXT_NODE` 行距字段的版本差异，Open Canvas 的原生剪贴板载荷会为带已解析行距的匿名文本补充一个 `SPAN` 行内包装，并在包装元素上写入像素行距；这仍是布局中性的文本包装，不会把文本拆成多个图层。需要完整 scene 数据、行距回读和降级报告时，在 Figma 的 `Plugins > Development > Import plugin from manifest…` 选择 `figma-plugin/manifest.json`，运行 `Open Canvas Importer`。本地 Canvas 的导出通知会显示一次性配对码；优先将该配对码输入插件并点击 `Read paired export`，然后点击 `Import editable layers`。如果插件无法读取系统 HTML 剪贴板，也可使用该配对码读取完整导出。通过 `PORT` 指定自定义本地端口时，复制按钮会将端口附加为 `32位配对码@端口`，插件会优先读取该端口并继续校验纯配对码；默认 `5183/5200` 仍保持原来的 32 位格式。插件读取的完整 scene 载荷包含行距、边界和 Auto Layout 元数据。
 4. URL 页面不会写入伪造的 URL 剪贴板。请在官方扩展中使用 `Capture page` 或 `Capture element`，它需要一个可访问的顶层页面作为捕获源。
 
 Canvas 的复制入口不会自动打开页面预览。普通浏览器优先通过同一个 `ClipboardItem` 写入 H2D `text/html` 和空的 `text/plain` 伴随类型。macOS 本地开发服务器可写入系统 HTML 剪贴板，并为增强 scene 数据生成五分钟有效、仅可读取一次的配对码；插件无法匿名读取上次导出。`text/plain` 不是独立成功路径。系统桥接不可用时才尝试浏览器富文本写入及 HTML 选择区 fallback。交互脚本、跨域 iframe、不可获取的图片和缺失字体会产生降级诊断。

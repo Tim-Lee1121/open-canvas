@@ -10,7 +10,6 @@ import {
   createId,
   getDefaultCanvasPosition,
   isCanvasPosition,
-  isLayoutMode,
   normalizeBoardName,
   normalizePageTitle,
   normalizePageSource,
@@ -52,7 +51,6 @@ export type AppAction =
       type: "UPDATE_CANVAS_POSITION";
       payload: { pageId: string; position: CanvasPosition };
     }
-  | { type: "SET_LAYOUT_MODE"; payload: { boardId: string; layoutMode: "grid" | "canvas" } }
   | { type: "CREATE_TAG"; payload: { boardId: string; text?: string; color?: TagColor; canvasPosition?: CanvasPosition; size?: { width: number; height: number }; id?: string } }
   | { type: "UPDATE_TAG"; payload: { tagId: string; changes: { text?: string; color?: TagColor; canvasPosition?: CanvasPosition; size?: { width: number; height: number } } } }
   | { type: "DELETE_TAG"; payload: { tagId: string } }
@@ -114,14 +112,12 @@ function makeBoard(input: CreateBoardInput, existingIds: Set<string>, timestamp:
   const requestedId = typeof input.id === "string" ? input.id.trim() : "";
   const id = requestedId || createId("board");
   if (existingIds.has(id)) return null;
-  const layoutMode = input.layoutMode ?? "grid";
-  if (!isLayoutMode(layoutMode)) return null;
   const createdAt = typeof input.createdAt === "string" && input.createdAt.trim() ? input.createdAt : timestamp;
   return {
     id,
     name: normalizeBoardName(input.name),
     pageIds: [],
-    layoutMode,
+    layoutMode: "canvas",
     createdAt,
     updatedAt: timestamp,
     tags: [],
@@ -496,13 +492,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return updateBoard(nextState, page.boardId, (board) => ({ ...board }), timestamp);
     }
 
-    case "SET_LAYOUT_MODE": {
-      if (!isLayoutMode(action.payload.layoutMode)) return state;
-      return updateBoard(state, action.payload.boardId, (board) =>
-        board.layoutMode === action.payload.layoutMode ? board : { ...board, layoutMode: action.payload.layoutMode },
-      );
-    }
-
     case "CREATE_TAG": {
       const payload = action.payload;
       const board = getBoard(state, payload.boardId);
@@ -598,10 +587,6 @@ export const actions = {
   updateCanvasPosition: (pageId: string, position: CanvasPosition): AppAction => ({
     type: "UPDATE_CANVAS_POSITION",
     payload: { pageId, position },
-  }),
-  setLayoutMode: (boardId: string, layoutMode: "grid" | "canvas"): AppAction => ({
-    type: "SET_LAYOUT_MODE",
-    payload: { boardId, layoutMode },
   }),
   createTag: (boardId: string, text?: string, color?: TagColor, canvasPosition?: CanvasPosition, id?: string, size?: { width: number; height: number }): AppAction => ({ type: "CREATE_TAG", payload: { boardId, text, color, canvasPosition, id, size } }),
   updateTag: (tagId: string, changes: { text?: string; color?: TagColor; canvasPosition?: CanvasPosition; size?: { width: number; height: number } }): AppAction => ({ type: "UPDATE_TAG", payload: { tagId, changes } }),

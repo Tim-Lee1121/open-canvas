@@ -60,8 +60,14 @@ export async function readProjectState(
   } catch {
     throw new Error(`Board state is not valid JSON: ${filePath}`);
   }
+  if (parsed && typeof parsed === "object" && (parsed as { schemaVersion?: unknown }).schemaVersion === 1) {
+    const legacy = parsed as { schemaVersion: number; boards?: Array<Record<string, unknown>> };
+    legacy.schemaVersion = 2;
+    legacy.boards = (legacy.boards ?? []).map((board) => ({ ...board, layoutMode: "canvas", tags: Array.isArray(board.tags) ? board.tags : [] }));
+    parsed = legacy;
+  }
   if (!isAppState(parsed)) {
-    throw new Error(`Board state does not match schema version 1: ${filePath}`);
+    throw new Error(`Board state does not match schema version ${2}: ${filePath}`);
   }
   return { state: parsed, revision: createProjectStateRevision(serialized) };
 }

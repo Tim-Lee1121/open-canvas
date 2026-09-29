@@ -6,6 +6,6 @@ describe("Figma development manifest", () => {
     const manifest = JSON.parse(readFileSync("figma-plugin/manifest.json", "utf8"));
     expect(manifest.documentAccess).toBe("dynamic-page");
     expect(manifest.networkAccess.allowedDomains).toEqual(["none"]);
-    expect(manifest.networkAccess.devAllowedDomains).toEqual(["http://localhost:5183"]);
+    expect(manifest.networkAccess.devAllowedDomains).toEqual(["http://localhost:5183", "http://localhost:5200"]);
   });
 });

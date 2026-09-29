@@ -18,6 +18,9 @@ export interface SaveStateResult {
 }
 
 export const PROJECT_NAME_STORAGE_KEY = "codex-ai-board.project-name.v1";
+export const WORKSPACE_VIEW_STORAGE_KEY = "codex-ai-board.workspace-view.v1";
+export const THEME_MODE_STORAGE_KEY = "open-canvas.theme-mode.v1";
+export type ThemeMode = "light" | "dark" | "system";
 export const DEFAULT_PROJECT_NAME = "Open Canvas";
 const LEGACY_DEFAULT_PROJECT_NAMES = new Set(["AI Page Board", "AI page board", "974 Project", "Neuxmind Canvas"]);
 const MAX_PROJECT_NAME_LENGTH = 80;
@@ -48,7 +51,11 @@ export function serializeState(state: AppState): string {
 export function deserializeState(raw: string | null | undefined, fallback: AppState = createInitialState()): AppState {
   if (!raw) return cloneState(fallback);
   try {
-    const parsed = JSON.parse(raw) as { boards?: Array<Record<string, unknown>> };
+    const parsed = JSON.parse(raw) as { schemaVersion?: unknown; boards?: Array<Record<string, unknown>> };
+    if (parsed && parsed.schemaVersion === 1 && Array.isArray(parsed.boards)) {
+      parsed.schemaVersion = 2;
+      parsed.boards = parsed.boards.map((board) => ({ ...board, layoutMode: "canvas" }));
+    }
     // v1 states created before Tags existed are upgraded in memory. Keeping
     // the schema version stable makes the addition backwards compatible.
     const candidate = parsed && Array.isArray(parsed.boards)
@@ -100,6 +107,48 @@ export function clearState(storage?: StorageLike | null): boolean {
   if (!target || typeof target.removeItem !== "function") return false;
   try {
     target.removeItem(STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadWorkspaceView(storage?: StorageLike | null): "canvas" | "design-system" {
+  const target = resolveStorage(storage);
+  try {
+    const value = target?.getItem(WORKSPACE_VIEW_STORAGE_KEY);
+    return value === "design-system" ? value : "canvas";
+  } catch {
+    return "canvas";
+  }
+}
+
+export function saveWorkspaceView(view: "canvas" | "design-system", storage?: StorageLike | null): boolean {
+  const target = resolveStorage(storage);
+  if (!target) return false;
+  try {
+    target.setItem(WORKSPACE_VIEW_STORAGE_KEY, view);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadThemeMode(storage?: StorageLike | null): ThemeMode {
+  const target = resolveStorage(storage);
+  try {
+    const value = target?.getItem(THEME_MODE_STORAGE_KEY);
+    return value === "dark" || value === "system" ? value : "light";
+  } catch {
+    return "light";
+  }
+}
+
+export function saveThemeMode(mode: ThemeMode, storage?: StorageLike | null): boolean {
+  const target = resolveStorage(storage);
+  if (!target) return false;
+  try {
+    target.setItem(THEME_MODE_STORAGE_KEY, mode);
     return true;
   } catch {
     return false;

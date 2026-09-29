@@ -9,13 +9,13 @@ import {
   createId,
   getDefaultCanvasPosition,
   isCanvasPosition,
-  isLayoutMode,
   limits,
   nowIso,
   validateBoardName,
   validatePageSource,
   validatePageTitle,
 } from "../domain/model";
+import { DGA_MANIFEST, getDesignContext, validateHtmlDesign } from "../design-system/dgaProvider";
 
 /**
  * A deliberately small structural type for the WebMCP API. The API is still
@@ -566,7 +566,7 @@ export function createWebMcpTools<Action = unknown>(runtime: WebMcpRuntime<Actio
       type: "object",
       properties: {
         name: { type: "string", minLength: 1, maxLength: limits.maxBoardNameLength, description: "Board name" },
-        layoutMode: { type: "string", enum: ["grid", "canvas"] },
+        layoutMode: { type: "string", enum: ["grid", "canvas"], description: "Legacy input; new boards always use Canvas" },
         activate: { type: "boolean", description: "Select the new board" },
       },
       required: ["name"],
@@ -587,8 +587,7 @@ export function createWebMcpTools<Action = unknown>(runtime: WebMcpRuntime<Actio
       const nameError = validateBoardName(name.value);
       if (nameError) return failure("invalid_input", nameError, "name");
       const requestedLayoutMode = ownValue(input, "layoutMode");
-      const layoutMode = requestedLayoutMode === undefined ? "grid" : requestedLayoutMode;
-      if (!isLayoutMode(layoutMode)) {
+      if (requestedLayoutMode !== undefined && requestedLayoutMode !== "grid" && requestedLayoutMode !== "canvas") {
         return failure("invalid_input", "layoutMode must be grid or canvas", "layoutMode");
       }
       const activate = optionalBoolean(input, "activate", true);
@@ -596,7 +595,7 @@ export function createWebMcpTools<Action = unknown>(runtime: WebMcpRuntime<Actio
       const board: CreateBoardInput = {
         id: createId("board"),
         name: name.value,
-        layoutMode,
+        layoutMode: "canvas",
         createdAt: nowIso(),
       };
       const actionError = dispatch(runtime, {
@@ -733,7 +732,7 @@ export function createWebMcpTools<Action = unknown>(runtime: WebMcpRuntime<Actio
         ...sourceProperties,
         x: { type: "number", description: "Canvas x coordinate" },
         y: { type: "number", description: "Canvas y coordinate" },
-        index: { type: "integer", minimum: 0, description: "Grid insertion index" },
+        index: { type: "integer", minimum: 0, description: "Ordered page insertion index (legacy compatibility)" },
         select: { type: "boolean", description: "Select the new page" },
       },
       required: ["title", "sourceType", "source"],
@@ -972,6 +971,76 @@ export function createWebMcpTools<Action = unknown>(runtime: WebMcpRuntime<Actio
     },
   };
 
+  const listDesignSystems: ModelContextTool = {
+    name: "list_design_systems",
+    description: "List registered Design System providers and readiness summaries.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false, untrustedContentHint: true },
+    execute: async (rawInput) => {
+      if (asRecord(rawInput ?? {}) === null) return failure("invalid_input", "Input must be an object");
+      return success("list_design_systems", { systems: [{ id: DGA_MANIFEST.id, name: DGA_MANIFEST.name, version: DGA_MANIFEST.version, theme: DGA_MANIFEST.theme, status: DGA_MANIFEST.status, readiness: DGA_MANIFEST.readiness }] });
+    },
+  };
+
+  const getDesignSystem: ModelContextTool = {
+    name: "get_design_system",
+    description: "Inspect the registered Design System manifest without returning the full knowledge base.",
+    inputSchema: { type: "object", properties: { systemId: { type: "string", minLength: 1 } }, required: ["systemId"], additionalProperties: false },
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false, untrustedContentHint: true },
+    execute: async (rawInput) => {
+      const input = asRecord(rawInput);
+      if (!input || typeof input.systemId !== "string") return failure("invalid_input", "systemId must be a string", "systemId");
+      if (input.systemId !== DGA_MANIFEST.id) return failure("not_found", `Design System not found: ${input.systemId}`, "systemId");
+      return success("get_design_system", { system: DGA_MANIFEST });
+    },
+  };
+
+  const getDesignContextTool: ModelContextTool = {
+    name: "get_design_context",
+    description: "Return a minimal, provenance-aware Design System context bundle for page generation.",
+    inputSchema: { type: "object", properties: { intent: { type: "string", maxLength: 500 }, theme: { type: "string", enum: DGA_MANIFEST.themes } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false, untrustedContentHint: true },
+    execute: async (rawInput) => {
+      const input = asRecord(rawInput ?? {});
+      if (!input) return failure("invalid_input", "Input must be an object");
+      const theme = typeof input.theme === "string" ? input.theme : DGA_MANIFEST.theme;
+      if (!DGA_MANIFEST.themes.includes(theme)) return failure("invalid_input", `Unsupported Design System theme: ${theme}`, "theme");
+      return success("get_design_context", { context: getDesignContext(typeof input.intent === "string" ? input.intent : undefined, theme) });
+    },
+  };
+
+  const getPageDesignBinding: ModelContextTool = {
+    name: "get_page_design_binding",
+    description: "Inspect a page's declared Design System metadata.",
+    inputSchema: { type: "object", properties: pageSelectorProperties, required: ["pageId"], additionalProperties: false },
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false, untrustedContentHint: true },
+    execute: async (rawInput) => {
+      const input = asRecord(rawInput);
+      if (!input) return failure("invalid_input", "Input must be an object");
+      const page = pageFromId(runtime.getState(), input);
+      if ("error" in page) return page.error;
+      if (page.value.source.type !== "html") return success("get_page_design_binding", { pageId: page.value.id, status: "unbound", reason: "URL pages require external capture" });
+      const system = page.value.source.value.match(/<meta[^>]+name=["']open-canvas-design-system["'][^>]+content=["']([^"']+)["']/i)?.[1];
+      const theme = page.value.source.value.match(/<meta[^>]+name=["']open-canvas-design-theme["'][^>]+content=["']([^"']+)["']/i)?.[1];
+      return success("get_page_design_binding", { pageId: page.value.id, status: system ? "bound" : "unbound", system, theme });
+    },
+  };
+
+  const validatePageDesign: ModelContextTool = {
+    name: "validate_page_design",
+    description: "Run static Design System binding and provenance checks for an HTML page.",
+    inputSchema: { type: "object", properties: pageSelectorProperties, required: ["pageId"], additionalProperties: false },
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false, untrustedContentHint: true },
+    execute: async (rawInput) => {
+      const input = asRecord(rawInput);
+      if (!input) return failure("invalid_input", "Input must be an object");
+      const page = pageFromId(runtime.getState(), input);
+      if ("error" in page) return page.error;
+      if (page.value.source.type !== "html") return success("validate_page_design", { pageId: page.value.id, result: { status: "unbound", issues: [{ severity: "warning", code: "url-source", message: "URL pages require external capture." }] } });
+      return success("validate_page_design", { pageId: page.value.id, result: validateHtmlDesign(page.value.source.value) });
+    },
+  };
+
   return [
     listBoards,
     listPages,
@@ -982,6 +1051,11 @@ export function createWebMcpTools<Action = unknown>(runtime: WebMcpRuntime<Actio
     updatePage,
     movePage,
     deletePage,
+    listDesignSystems,
+    getDesignSystem,
+    getDesignContextTool,
+    getPageDesignBinding,
+    validatePageDesign,
   ];
 }
 

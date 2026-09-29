@@ -6,10 +6,19 @@
  * integrations can therefore use the same validation and normalization rules.
  */
 
-export const STATE_SCHEMA_VERSION = 1 as const;
-export const STORAGE_KEY = "ai-board-state:v1" as const;
+export const STATE_SCHEMA_VERSION = 2 as const;
+export const STORAGE_KEY = "ai-board-state:v2" as const;
 
-export type LayoutMode = "grid" | "canvas";
+export interface PageDesignSystemBinding {
+  id: string;
+  name: string;
+  version: string;
+  theme: string;
+  digest: string;
+  status: "ready" | "needs-review" | "blocked";
+}
+
+export type LayoutMode = "canvas";
 
 export type PageSource =
   | { type: "url"; value: string }
@@ -51,6 +60,7 @@ export interface Page {
   canvasPosition: CanvasPosition;
   createdAt: string;
   updatedAt: string;
+  designSystemBinding?: PageDesignSystemBinding;
 }
 
 export interface AppState {
@@ -196,7 +206,7 @@ export function normalizePageSource(source: unknown): PageSource {
 }
 
 export function isLayoutMode(value: unknown): value is LayoutMode {
-  return value === "grid" || value === "canvas";
+  return value === "canvas";
 }
 
 export function isCanvasPosition(value: unknown): value is CanvasPosition {
@@ -281,7 +291,7 @@ export function isAppState(value: unknown): value is AppState {
       typeof board.name !== "string" ||
       validateBoardName(board.name) !== null ||
       !Array.isArray(board.pageIds) ||
-      !isLayoutMode(board.layoutMode) ||
+      board.layoutMode !== "canvas" ||
       typeof board.createdAt !== "string" ||
       typeof board.updatedAt !== "string" ||
       (!Array.isArray((board as Board).tags) && (board as { tags?: unknown }).tags !== undefined)
@@ -307,6 +317,13 @@ export function isAppState(value: unknown): value is AppState {
       !isCanvasPosition(typedPage.canvasPosition) ||
       typeof typedPage.createdAt !== "string" ||
       typeof typedPage.updatedAt !== "string"
+      || (typedPage.designSystemBinding !== undefined && (
+        !typedPage.designSystemBinding || typeof typedPage.designSystemBinding !== "object" ||
+        typeof typedPage.designSystemBinding.id !== "string" || typeof typedPage.designSystemBinding.name !== "string" ||
+        typeof typedPage.designSystemBinding.version !== "string" || typeof typedPage.designSystemBinding.theme !== "string" ||
+        typeof typedPage.designSystemBinding.digest !== "string" ||
+        !["ready", "needs-review", "blocked"].includes(typedPage.designSystemBinding.status)
+      ))
     ) {
       return false;
     }

@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Menu, PanelLeftClose, X } from "./components/huge-icons";
+import { AlertCircle, CheckCircle2, Copy, Menu, PanelLeftClose, X } from "./components/huge-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppAction } from "./state/reducer";
 import { getActiveBoard, getActivePages } from "./state/reducer";
@@ -8,7 +8,7 @@ import {
   CanvasView,
   ConfirmDialog,
   DeleteBoardDialog,
-  GridView,
+  DesignSystemView,
   MovePageDialog,
   PageDialog,
   Sidebar,
@@ -16,7 +16,7 @@ import {
 import { installAnnotationModeMarker } from "./components/annotationMode";
 import { installAnnotationInteraction } from "./components/annotationInteraction";
 import { registerWebMcpTools, type WebMcpRegistration } from "./integrations/webmcp";
-import { loadProjectName, saveProjectName } from "./state/storage";
+import { loadProjectName, loadThemeMode, loadWorkspaceView, saveProjectName, saveThemeMode, saveWorkspaceView, type ThemeMode } from "./state/storage";
 import { copyPageToFigmaClipboard, FigmaExportError } from "./components/figmaClipboard";
 import type { DeviceFrame } from "./components/device-presets";
 
@@ -45,10 +45,10 @@ export default function App({ store: providedStore }: AppProps = {}) {
   const [figmaPairingCode, setFigmaPairingCode] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const announce = useCallback((message: string) => {
+  const announce = useCallback((message: string, durationMs = 3600) => {
     setNotice(message);
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => setNotice(null), 3600);
+    noticeTimer.current = setTimeout(() => setNotice(null), durationMs);
   }, []);
 
   const { state, dispatch, store } = useAppState({
@@ -59,6 +59,8 @@ export default function App({ store: providedStore }: AppProps = {}) {
   const activePages = activeBoard ? getActivePages({ ...state, activeBoardId: activeBoard.id }) : [];
   const [modal, setModal] = useState<ModalState>(null);
   const [projectName, setProjectName] = useState(() => loadProjectName());
+  const [workspaceView, setWorkspaceView] = useState<"canvas" | "design-system">(() => loadWorkspaceView());
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(() => (
@@ -70,6 +72,21 @@ export default function App({ store: providedStore }: AppProps = {}) {
   const sidebarExpandRef = useRef<HTMLButtonElement>(null);
   const wasSidebarOpen = useRef(false);
   const isSidebarCollapsed = !isMobileViewport && sidebarCollapsed;
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const mediaQuery = typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+    const applyTheme = () => {
+      const resolved = themeMode === "system" ? Boolean(mediaQuery?.matches) : themeMode === "dark";
+      root.dataset.theme = resolved ? "dark" : "light";
+      root.dataset.themeMode = themeMode;
+    };
+    applyTheme();
+    mediaQuery?.addEventListener?.("change", applyTheme);
+    return () => mediaQuery?.removeEventListener?.("change", applyTheme);
+  }, [themeMode]);
 
   useEffect(() => () => {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
@@ -170,6 +187,12 @@ export default function App({ store: providedStore }: AppProps = {}) {
     setSidebarOpen(false);
   };
 
+  const changeWorkspaceView = (view: "canvas" | "design-system") => {
+    setWorkspaceView(view);
+    saveWorkspaceView(view);
+    setSidebarOpen(false);
+  };
+
   const selectPage = (pageId: string) => dispatch({ type: "SELECT_PAGE", payload: { pageId } });
   const clearSelection = () => dispatch({ type: "SELECT_PAGE", payload: { pageId: null } });
 
@@ -196,11 +219,18 @@ export default function App({ store: providedStore }: AppProps = {}) {
     announce(`Preparing Figma-compatible export for “${page.title}”…`);
     try {
       const pairingCode = await copyPageToFigmaClipboard(page, deviceFrame);
-      setFigmaPairingCode(pairingCode ?? null);
-      announce(pairingCode
-        ? `Generated Figma-compatible editable layers for “${page.title}”. Paste in a compatible Figma Desktop workflow, or enter the pairing code in Open Canvas Importer.`
-        : `Generated Figma-compatible editable layers for “${page.title}”. Paste in a compatible Figma Desktop workflow.`);
+      if (pairingCode) {
+        setFigmaPairingCode(pairingCode);
+        announce(
+          "Export ready. Use the pairing code in Open Canvas Importer for full line-height and layout fidelity.",
+          8_000,
+        );
+      } else {
+        setFigmaPairingCode(null);
+        announce(`Generated Figma-compatible editable layers for “${page.title}”. Paste in a compatible Figma Desktop workflow.`);
+      }
     } catch (error) {
+      setFigmaPairingCode(null);
       if (error instanceof FigmaExportError && error.code === "url-source") {
         announce("URL pages require Figma's official Capture page flow.");
       } else if (error instanceof FigmaExportError && error.code === "clipboard-unavailable") {
@@ -220,12 +250,12 @@ export default function App({ store: providedStore }: AppProps = {}) {
   const editingBoard = modal?.type === "board" && modal.boardId ? boardById.get(modal.boardId) : undefined;
 
   return (
-    <div className={`app-shell${activeBoard?.layoutMode === "canvas" ? " app-shell--canvas" : ""}${isSidebarCollapsed ? " app-shell--sidebar-collapsed" : ""}`}>
+    <div className={`app-shell app-shell--canvas${isSidebarCollapsed ? " app-shell--sidebar-collapsed" : ""}`}>
       <Sidebar
         boards={state.boards}
         pagesById={pageById}
         activeBoardId={activeBoard?.id}
-        layoutMode={activeBoard?.layoutMode}
+        workspaceView={workspaceView}
         projectName={projectName}
         onProjectNameChange={(name) => {
           setProjectName(name);
@@ -245,7 +275,12 @@ export default function App({ store: providedStore }: AppProps = {}) {
           dispatch({ type: "MOVE_PAGE", payload: { pageId, targetBoardId } });
           announce(`Moved “${page.title}” to ${boardById.get(targetBoardId)?.name ?? "the selected board"}.`);
         }}
-        onChangeLayout={(layoutMode) => activeBoard && dispatch({ type: "SET_LAYOUT_MODE", payload: { boardId: activeBoard.id, layoutMode } })}
+        onChangeWorkspaceView={changeWorkspaceView}
+        themeMode={themeMode}
+        onChangeThemeMode={(mode) => {
+          setThemeMode(mode);
+          saveThemeMode(mode);
+        }}
       />
 
       {isSidebarCollapsed ? (
@@ -254,15 +289,17 @@ export default function App({ store: providedStore }: AppProps = {}) {
         </button>
       ) : null}
 
-      <main className={`main-panel${activeBoard?.layoutMode === "canvas" ? " main-panel--canvas" : ""}`}>
+      <main className="main-panel main-panel--canvas">
         <div className="mobile-topbar">
           <button ref={mobileSidebarTriggerRef} type="button" className="icon-button" onClick={() => setSidebarOpen(true)} aria-label="Open boards" aria-controls="boards-sidebar" aria-expanded={sidebarOpen} title="Open boards"><Menu size={19} aria-hidden="true" /></button>
           <span>Open Canvas</span>
         </div>
         <div className="main-content">
-          <div key={`${activeBoard?.id}:${activeBoard?.layoutMode}`} className="main-content__inner board-view-enter">
+          <div key={`${activeBoard?.id}:${workspaceView}`} className="main-content__inner board-view-enter">
             {activeBoard ? (
-              activeBoard.layoutMode === "canvas" ? (
+              workspaceView === "design-system" ? (
+                <DesignSystemView pages={activePages} />
+              ) : (
                 <CanvasView
                   pages={activePages}
                   tags={activeBoard.tags ?? []}
@@ -288,19 +325,6 @@ export default function App({ store: providedStore }: AppProps = {}) {
                   onDeleteTag={(tagId) => dispatch({ type: "DELETE_TAG", payload: { tagId } })}
                   onCopyTag={() => announce("Tag text copied.")}
                 />
-              ) : (
-                <GridView
-                  pages={activePages}
-                  boards={state.boards}
-                  activeBoardId={activeBoard.id}
-                  selectedPageId={state.selectedPageId}
-                  onSelectPage={selectPage}
-                  onClearSelection={clearSelection}
-                  onEditPage={(page) => setModal({ type: "page", pageId: page.id })}
-                  onDeletePage={requestDeletePage}
-                  onMovePage={movePage}
-                  onReorderPage={(pageId, targetIndex) => dispatch({ type: "MOVE_PAGE", payload: { pageId, targetBoardId: activeBoard.id, targetIndex } })}
-                />
               )
             ) : (
               <div className="empty-state"><AlertCircle size={24} aria-hidden="true" /><h2>No boards yet</h2><p>Create a board to start collecting generated mobile interfaces.</p><button type="button" className="primary-button" onClick={() => setModal({ type: "board", boardId: null })}>Create board</button></div>
@@ -311,8 +335,31 @@ export default function App({ store: providedStore }: AppProps = {}) {
 
       {sidebarOpen ? <button type="button" className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close boards" /> : null}
 
-      {figmaPairingCode ? <div className="figma-pairing" role="status"><span>Figma plugin pairing code (valid for 5 minutes, one use)</span><code>{figmaPairingCode}</code><button type="button" className="icon-button" onClick={() => setFigmaPairingCode(null)} aria-label="Dismiss pairing code" title="Dismiss pairing code"><X size={15} aria-hidden="true" /></button></div> : null}
-      {notice ? <div className="toast" role="status"><CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" /><span>{notice}</span><button type="button" className="icon-button" onClick={() => setNotice(null)} aria-label="Dismiss notification" title="Dismiss"><X size={15} strokeWidth={2} aria-hidden="true" /></button></div> : null}
+      {figmaPairingCode || notice ? (
+        <div className="notification-stack" aria-live="polite">
+          {figmaPairingCode ? (
+            <div className="figma-pairing" role="status" aria-label="Figma importer pairing code">
+              <div className="figma-pairing__copy">
+                <span>Open Canvas Importer 配对码（5 分钟内有效，仅可使用一次）</span>
+                <code>{figmaPairingCode}</code>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => {
+                  const write = navigator.clipboard?.writeText(figmaPairingCode);
+                  if (write) void write.then(() => announce("Figma importer pairing code copied.")).catch(() => announce("Copy failed. Select the pairing code manually."));
+                  else announce("Copy is unavailable. Select the pairing code manually.");
+                }}
+                aria-label="Copy Figma importer pairing code"
+                title="Copy pairing code"
+              ><Copy size={15} strokeWidth={2} aria-hidden="true" /></button>
+              <button type="button" className="icon-button" onClick={() => setFigmaPairingCode(null)} aria-label="Dismiss pairing code" title="Dismiss pairing code"><X size={15} strokeWidth={2} aria-hidden="true" /></button>
+            </div>
+          ) : null}
+          {notice ? <div className="toast" role="status"><CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" /><span>{notice}</span><button type="button" className="icon-button" onClick={() => setNotice(null)} aria-label="Dismiss notification" title="Dismiss"><X size={15} strokeWidth={2} aria-hidden="true" /></button></div> : null}
+        </div>
+      ) : null}
 
       <BoardDialog
         open={modal?.type === "board"}

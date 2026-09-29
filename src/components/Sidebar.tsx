@@ -1,14 +1,16 @@
-import { BoardFile, Check, MoreHorizontal, PanelLeftClose, Pencil, Plus, ProjectDocument, Trash2 } from "./huge-icons";
+import { BoardFile, Check, ChevronDown, Computer, MoreHorizontal, Moon, PanelLeftClose, Pencil, Plus, ProjectDocument, Sparkles, Sun, Trash2 } from "./huge-icons";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import type { Board, LayoutMode } from "../domain/model";
+import type { Board } from "../domain/model";
 import type { BoardActionProps, PagesById } from "./types";
 import { getFocusableElements } from "./focus";
+import type { ThemeMode } from "../state/storage";
 
 export interface SidebarProps extends BoardActionProps {
   boards: Board[];
   pagesById?: PagesById;
   activeBoardId?: string;
-  layoutMode?: LayoutMode;
+  workspaceView?: "canvas" | "design-system";
+  onChangeWorkspaceView?: (view: "canvas" | "design-system") => void;
   projectName?: string;
   onProjectNameChange?: (name: string) => void;
   /** Whether the sidebar is rendered as the narrow-screen drawer. */
@@ -17,13 +19,15 @@ export interface SidebarProps extends BoardActionProps {
   isCollapsed?: boolean;
   onClose?: () => void;
   onDropPage?: (pageId: string, targetBoardId: string) => void;
-  onChangeLayout?: (mode: LayoutMode) => void;
+  themeMode?: ThemeMode;
+  onChangeThemeMode?: (mode: ThemeMode) => void;
 }
 
 export function Sidebar({
   boards,
   activeBoardId,
-  layoutMode,
+  workspaceView = "canvas",
+  onChangeWorkspaceView,
   projectName = "Open Canvas",
   onProjectNameChange,
   isMobile = false,
@@ -35,10 +39,10 @@ export function Sidebar({
   onRenameBoard,
   onDeleteBoard,
   onDropPage,
-  onChangeLayout,
+  themeMode = "light",
+  onChangeThemeMode,
 }: SidebarProps) {
   const activeBoard = boards.find((board) => board.id === activeBoardId);
-  const activeLayoutMode = layoutMode ?? activeBoard?.layoutMode ?? "grid";
   const [editingBoardId, setEditingBoardId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const cancelRenameOnBlur = useRef(false);
@@ -70,6 +74,16 @@ export function Sidebar({
     if (!isMobile && wasCollapsed.current && !isCollapsed) closeButtonRef.current?.focus();
     wasCollapsed.current = isCollapsed;
   }, [isCollapsed, isMobile]);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || target.closest(".sidebar__theme-menu")) return;
+      sidebarRef.current?.querySelectorAll(".sidebar__theme-menu[open]").forEach((menu) => menu.removeAttribute("open"));
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
 
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -144,6 +158,8 @@ export function Sidebar({
     sidebarRef.current?.querySelectorAll("details[open]").forEach((details) => details.removeAttribute("open"));
   };
   const readPageId = (event: React.DragEvent) => event.dataTransfer.getData("application/x-ai-board-page") || event.dataTransfer.getData("text/plain");
+  const themeLabel = themeMode === "system" ? "System" : themeMode === "dark" ? "Dark" : "Light";
+  const ThemeIcon = themeMode === "system" ? Computer : themeMode === "dark" ? Moon : Sun;
 
   return (
     <aside id="boards-sidebar" ref={sidebarRef} className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Boards" aria-hidden={isHidden ? "true" : undefined}>
@@ -181,12 +197,10 @@ export function Sidebar({
         <button ref={closeButtonRef} type="button" className="icon-button sidebar__collapse" onClick={onClose} aria-label={isMobile ? "Close boards" : "Collapse boards"} aria-controls="boards-sidebar" aria-expanded={!isHidden} title={isMobile ? "Close boards" : "Collapse boards"}><PanelLeftClose size={17} aria-hidden="true" /></button>
       </div>
 
-      {activeBoard && onChangeLayout ? (
-        <div className="view-toggle sidebar__view-toggle" data-layout={activeLayoutMode} role="group" aria-label="View mode">
-          <button type="button" className={activeLayoutMode === "canvas" ? "is-active" : ""} onClick={() => onChangeLayout("canvas")} aria-pressed={activeLayoutMode === "canvas"}>Canvas</button>
-          <button type="button" className={activeLayoutMode === "grid" ? "is-active" : ""} onClick={() => onChangeLayout("grid")} aria-pressed={activeLayoutMode === "grid"}>Grid</button>
-        </div>
-      ) : null}
+      <div className="sidebar__view-toggle" data-layout={workspaceView} role="group" aria-label="Workspace">
+        <button type="button" className={workspaceView === "canvas" ? "is-active" : ""} onClick={() => onChangeWorkspaceView?.("canvas")} aria-pressed={workspaceView === "canvas"}>Canvas</button>
+        <button type="button" className={workspaceView === "design-system" ? "is-active" : ""} onClick={() => onChangeWorkspaceView?.("design-system")} aria-pressed={workspaceView === "design-system"}><Sparkles size={18} aria-hidden="true" /> Design System</button>
+      </div>
 
       <div className="sidebar__section-heading">
         <span>Boards <small>{boards.length}</small></span>
@@ -260,6 +274,17 @@ export function Sidebar({
           );
         })}
       </nav>
+
+      <div className="sidebar__settings">
+        <details className="action-menu sidebar__theme-menu">
+          <summary className="sidebar__settings-trigger"><ThemeIcon size={17} aria-hidden="true" /><span>Appearance</span><span className="sidebar__theme-current">{themeLabel}</span><ChevronDown size={14} aria-hidden="true" /></summary>
+          <div className="action-menu__panel" role="menu" aria-label="Appearance theme">
+            <button type="button" role="menuitemradio" aria-checked={themeMode === "light"} className={themeMode === "light" ? "is-active" : ""} onClick={(event) => { onChangeThemeMode?.("light"); closeActionMenu(event); }}><Sun size={15} aria-hidden="true" /> Light</button>
+            <button type="button" role="menuitemradio" aria-checked={themeMode === "dark"} className={themeMode === "dark" ? "is-active" : ""} onClick={(event) => { onChangeThemeMode?.("dark"); closeActionMenu(event); }}><Moon size={15} aria-hidden="true" /> Dark</button>
+            <button type="button" role="menuitemradio" aria-checked={themeMode === "system"} className={themeMode === "system" ? "is-active" : ""} onClick={(event) => { onChangeThemeMode?.("system"); closeActionMenu(event); }}><Computer size={15} aria-hidden="true" /> Follow system</button>
+          </div>
+        </details>
+      </div>
 
     </aside>
   );

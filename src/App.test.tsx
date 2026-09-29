@@ -6,6 +6,15 @@ import { createSeedState } from "./test/fixtures";
 import { createEmptyState } from "./state/reducer";
 import { PROJECT_NAME_STORAGE_KEY, STORAGE_KEY, serializeState } from "./state/storage";
 
+const figmaClipboardMock = vi.hoisted(() => ({
+  copyPageToFigmaClipboard: vi.fn(),
+  FigmaExportError: class FigmaExportError extends Error {
+    code: "url-source" | "capture-failed" | "clipboard-unavailable" = "capture-failed";
+  },
+}));
+
+vi.mock("./components/figmaClipboard", () => figmaClipboardMock);
+
 /**
  * App owns its store, so tests seed the same versioned storage that a browser
  * session uses. This keeps the interaction tests close to the real refresh
@@ -40,9 +49,42 @@ afterEach(() => {
 });
 
 describe("Open Canvas workspace", () => {
+  it("keeps the pairing code available for the full-fidelity Figma importer", async () => {
+    figmaClipboardMock.copyPageToFigmaClipboard.mockResolvedValue("a".repeat(32));
+    const user = userEvent.setup();
+    render(<App />);
+
+    const card = pageCard("Welcome concept");
+    await user.click(within(card).getByRole("button", { name: "Export for Figma" }));
+
+    expect(await screen.findByRole("status", { name: "Figma importer pairing code" })).toHaveTextContent("a".repeat(32));
+    expect(screen.getByRole("button", { name: "Copy Figma importer pairing code" })).toBeInTheDocument();
+  });
+
   it("shows the branded project name by default", () => {
     render(<App />);
     expect(screen.getByRole("button", { name: "Rename project" })).toHaveTextContent("Open Canvas");
+  });
+
+  it("changes and persists the appearance theme from the sidebar", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const sidebar = screen.getByRole("complementary", { name: "Boards" });
+    await user.click(within(sidebar).getByText("Appearance"));
+    await user.click(screen.getByRole("menuitemradio", { name: "Dark" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(window.localStorage.getItem("open-canvas.theme-mode.v1")).toBe("dark");
+    expect(within(sidebar).getByRole("menuitemradio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("closes the appearance menu when clicking outside it", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const sidebar = screen.getByRole("complementary", { name: "Boards" });
+    await user.click(within(sidebar).getByText("Appearance"));
+    expect(screen.getByRole("menuitemradio", { name: "Dark" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Create board" }));
+    expect(screen.queryByRole("menuitemradio", { name: "Dark" })).not.toBeVisible();
   });
 
   it("collapses and restores the sidebar without changing canvas state", async () => {
@@ -72,16 +114,16 @@ describe("Open Canvas workspace", () => {
     expect(canvas).toHaveAttribute("style", transform);
   });
 
-  it("can collapse and expand the sidebar in Grid mode", async () => {
+  it("can collapse and expand the sidebar in Design System mode", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Grid" }));
-    const grid = screen.getByRole("list", { name: "Pages in this board" });
+    await user.click(screen.getByRole("button", { name: "Design System" }));
+    expect(screen.getByRole("region", { name: "Design System workspace" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Collapse boards" }));
     expect(document.querySelector(".app-shell")).toHaveClass("app-shell--sidebar-collapsed");
-    expect(grid).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Design System workspace" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Expand boards" }));
-    expect(screen.getByRole("button", { name: "Grid" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Design System" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("switches the active board from the sidebar", async () => {
@@ -101,7 +143,7 @@ describe("Open Canvas workspace", () => {
     expect(findPageCard("Welcome concept")).toBeNull();
   });
 
-  it("switches layout mode from the project sidebar control", async () => {
+  it("switches between Canvas and the project-level Design System workspace", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -112,9 +154,16 @@ describe("Open Canvas workspace", () => {
     expect(document.querySelector(".app-shell")).toHaveClass("app-shell--canvas");
     expect(document.querySelector(".board-header")).not.toBeInTheDocument();
 
-    await user.click(within(screen.getByRole("complementary", { name: "Boards" })).getByRole("button", { name: "Grid" }));
-    expect(document.querySelector(".app-shell")).not.toHaveClass("app-shell--canvas");
-    expect(document.querySelector(".board-header")).not.toBeInTheDocument();
+    await user.click(within(screen.getByRole("complementary", { name: "Boards" })).getByRole("button", { name: "Design System" }));
+    expect(screen.getByRole("region", { name: "Design System workspace" })).toBeInTheDocument();
+    expect(screen.queryByRole("toolbar", { name: "Canvas controls" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Design System" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("never exposes the removed Grid workspace", () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: "Grid" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Grid")).not.toBeInTheDocument();
   });
 
   it("does not expose manual page creation controls", () => {
@@ -175,8 +224,7 @@ describe("Open Canvas workspace", () => {
     render(<App />);
 
     const existingCard = pageCard("Welcome concept");
-    await user.click(within(existingCard).getByLabelText("Actions for Welcome concept"));
-    await user.click(within(existingCard).getByRole("menuitem", { name: "Edit page" }));
+    await user.click(within(existingCard).getByRole("button", { name: "Rename" }));
 
     const editDialog = screen.getByRole("dialog", { name: "Edit page" });
     const titleInput = within(editDialog).getByLabelText(/Page title/);
@@ -196,7 +244,7 @@ describe("Open Canvas workspace", () => {
     render(<App />);
 
     const welcomeCard = pageCard("Welcome concept");
-    await user.click(within(welcomeCard).getByLabelText("Actions for Welcome concept"));
+    await user.click(within(welcomeCard).getByText("Move to", { selector: "summary" }));
     await user.click(within(welcomeCard).getByRole("menuitem", { name: "Review queue" }));
 
     expect(findPageCard("Welcome concept")).toBeNull();

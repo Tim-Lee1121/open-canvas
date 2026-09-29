@@ -72,6 +72,40 @@ the inline and standalone path data match. The Board CLI validates these rules
 and synchronizes the standalone SVG files for `create-page`, `update-page`, and
 `export-page`; successful JSON results include the written `iconAssets` paths.
 
+## Design System context and provenance
+
+Before generating or revising an HTML page, resolve the project/Board/Page
+Design System binding and request the smallest context bundle needed by the
+page intent:
+
+```bash
+npm run board -- get-design-context --board-id <board-id> --page-id <page-id> --intent "..."
+```
+
+When no page exists yet, omit `--page-id`; the command resolves Page override,
+then Board override, then the project default. Treat the returned provider,
+version, digest, theme, patterns, components, tokens, hard stops, readiness,
+provenance, and QA checks as the generation context. Do not paste the complete
+Skill Markdown or `_rag` corpus into the task.
+
+Generated HTML should preserve lightweight provenance markers in the document
+head and on the relevant elements:
+
+```html
+<meta name="open-canvas-design-system" content="dga-design-system@1.0.0">
+<meta name="open-canvas-design-system-digest" content="<resolved digest>">
+<meta name="open-canvas-design-theme" content="light">
+<section data-ds-pattern="data-workspace-page">
+  <button data-ds-component="button" data-ds-variant="Primary" data-ds-state="Default">Query</button>
+</section>
+```
+
+Markers are traceability hints, not proof of compliance. Before reporting
+success, run `npm run board -- validate-page-design --page-id <page-id>` and
+report `passed`, `passed-with-warning`, `blocked`, or `unbound` separately from
+browser smoke and the Figma Desktop gate. Pages without an explicit binding
+remain `Unbound`; never infer DGA compliance from host workbench styling.
+
 1. Run `npm run board -- list-boards`. If the user named a Board, resolve that
    exact Board by name or stable ID. If they did not, use the active Board.
    Never create a new Board unless the user requested one.

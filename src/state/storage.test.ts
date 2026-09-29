@@ -11,6 +11,9 @@ import {
   saveState,
   saveProjectName,
   serializeState,
+  loadThemeMode,
+  saveThemeMode,
+  THEME_MODE_STORAGE_KEY,
   type StorageLike,
 } from "./storage";
 
@@ -37,7 +40,7 @@ describe("state storage", () => {
     const storage = new MemoryStorage();
     const seed = createSeedState();
     expect(saveState(seed, storage)).toBe(true);
-    expect(storage.getItem(STORAGE_KEY)).toContain('"schemaVersion":1');
+    expect(storage.getItem(STORAGE_KEY)).toContain('"schemaVersion":2');
     const loaded = loadState(storage);
     expect(loaded).toEqual(seed);
     expect(loaded).not.toBe(seed);
@@ -83,8 +86,8 @@ describe("state storage", () => {
 
   it("serializes a normalized schema version", () => {
     const seed = createSeedState();
-    const parsed = JSON.parse(serializeState({ ...seed, schemaVersion: 1 }));
-    expect(parsed.schemaVersion).toBe(1);
+    const parsed = JSON.parse(serializeState({ ...seed, schemaVersion: 2 }));
+    expect(parsed.schemaVersion).toBe(2);
     expect(parsed.boards).toHaveLength(2);
   });
 
@@ -121,5 +124,15 @@ describe("state storage", () => {
     });
     expect(initial.pagesById).toEqual({});
     expect(initial.selectedPageId).toBeNull();
+  });
+
+  it("persists the appearance mode and defaults invalid values to light", () => {
+    const storage = new MemoryStorage();
+    expect(loadThemeMode(storage)).toBe("light");
+    expect(saveThemeMode("dark", storage)).toBe(true);
+    expect(storage.getItem(THEME_MODE_STORAGE_KEY)).toBe("dark");
+    expect(loadThemeMode(storage)).toBe("dark");
+    storage.setItem(THEME_MODE_STORAGE_KEY, "unknown");
+    expect(loadThemeMode(storage)).toBe("light");
   });
 });
